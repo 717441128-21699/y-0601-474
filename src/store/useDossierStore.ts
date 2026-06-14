@@ -2,17 +2,22 @@ import { create } from 'zustand';
 import type { Dossier, DossierStatus } from '../types';
 import { mockDossiers } from '../data/mockData';
 import { useAuthStore } from './useAuthStore';
+import { loadPersist, savePersist } from './persist';
+
+const PERSIST_KEY = 'dossier-store';
 
 interface DossierState {
   dossiers: Dossier[];
   selectedDossier: Dossier | null;
   setSelectedDossier: (d: Dossier | null) => void;
-  submitDossier: (data: Partial<Dossier>) => void;
-  formatCheck: (dossierId: string, errors?: string[]) => void;
-  formatReject: (dossierId: string, errors: string[], reason: string) => void;
-  initialReview: (dossierId: string, comment: string, pass: boolean) => void;
-  chiefReview: (dossierId: string, comment: string, pass: boolean) => void;
-  resubmitDossier: (dossierId: string) => void;
+  submitDossier: (data: Partial<Dossier>) => boolean;
+  formatCheck: (dossierId: string, errors?: string[]) => boolean;
+  formatReject: (dossierId: string, errors: string[], reason: string) => boolean;
+  initialReview: (dossierId: string, comment: string, pass: boolean) => boolean;
+  chiefReview: (dossierId: string, comment: string, pass: boolean) => boolean;
+  resubmitDossier: (dossierId: string) => boolean;
+  canPerformAction: (action: 'format_check' | 'initial_review' | 'chief_review' | 'submit') => boolean;
+  getDossiersByCourtroom: (courtroomId: string) => Dossier[];
 }
 
 const STAGE_MAP: Record<DossierStatus, string> = {
@@ -27,15 +32,36 @@ const STAGE_MAP: Record<DossierStatus, string> = {
   archived: '已归档',
 };
 
-export const useDossierStore = create<DossierState>((set) => ({
-  dossiers: mockDossiers,
+const initialDossiers = loadPersist<Dossier[]>(PERSIST_KEY) || mockDossiers;
+
+export const useDossierStore = create<DossierState>((set, get) => ({
+  dossiers: initialDossiers,
   selectedDossier: null,
 
   setSelectedDossier: (d) => set({ selectedDossier: d }),
 
-  submitDossier: (data) => {
+  canPerformAction: (action) => {
     const user = useAuthStore.getState().currentUser;
-    if (!user) return;
+    if (!user) return false;
+    const role = user.role;
+    switch (action) {
+      case 'format_check':
+      case 'submit':
+        return role === 'clerk';
+      case 'initial_review':
+        return role === 'judge';
+      case 'chief_review':
+        return role === 'chief' || role === 'president';
+      default:
+        return false;
+    }
+  },
+
+  submitDossier: (data) => {
+    if (!get().canPerformAction('submit')) return false;
+
+    const user = useAuthStore.getState().currentUser;
+    if (!user) return false;
 
     const newDossier: Dossier = {
       id: `dos${Date.now()}`,
@@ -49,12 +75,16 @@ export const useDossierStore = create<DossierState>((set) => ({
       reviewHistory: [],
     };
     set((s) => ({ dossiers: [...s.dossiers, newDossier] }));
+    savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('提交案卷', newDossier.caseNumber);
+    return true;
   },
 
   formatCheck: (dossierId, errors) => {
+    if (!get().canPerformAction('format_check')) return false;
+
     const user = useAuthStore.getState().currentUser;
-    if (!user) return;
+    if (!user) return false;
 
     set((s) => ({
       dossiers: s.dossiers.map((d) =>
@@ -78,12 +108,16 @@ export const useDossierStore = create<DossierState>((set) => ({
           : d
       ),
     }));
+    savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('格式校验通过', `案卷ID: ${dossierId}`);
+    return true;
   },
 
   formatReject: (dossierId, errors, reason) => {
+    if (!get().canPerformAction('format_check')) return false;
+
     const user = useAuthStore.getState().currentUser;
-    if (!user) return;
+    if (!user) return false;
 
     set((s) => ({
       dossiers: s.dossiers.map((d) =>
@@ -107,12 +141,16 @@ export const useDossierStore = create<DossierState>((set) => ({
           : d
       ),
     }));
+    savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('格式校验退回', `案卷ID: ${dossierId}, ${errors.length}处问题`);
+    return true;
   },
 
   initialReview: (dossierId, comment, pass) => {
+    if (!get().canPerformAction('initial_review')) return false;
+
     const user = useAuthStore.getState().currentUser;
-    if (!user) return;
+    if (!user) return false;
 
     set((s) => ({
       dossiers: s.dossiers.map((d) =>
@@ -135,12 +173,16 @@ export const useDossierStore = create<DossierState>((set) => ({
           : d
       ),
     }));
+    savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog(pass ? '法官初审通过' : '法官初审退回', `案卷ID: ${dossierId}`);
+    return true;
   },
 
   chiefReview: (dossierId, comment, pass) => {
+    if (!get().canPerformAction('chief_review')) return false;
+
     const user = useAuthStore.getState().currentUser;
-    if (!user) return;
+    if (!user) return false;
 
     set((s) => ({
       dossiers: s.dossiers.map((d) =>
@@ -163,17 +205,31 @@ export const useDossierStore = create<DossierState>((set) => ({
           : d
       ),
     }));
+    savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog(pass ? '庭长批准通过' : '庭长审批退回', `案卷ID: ${dossierId}`);
+    return true;
   },
 
   resubmitDossier: (dossierId) => {
+    if (!get().canPerformAction('submit')) return false;
+
     set((s) => ({
       dossiers: s.dossiers.map((d) =>
         d.id === dossierId ? { ...d, status: 'format_checking' } : d
       ),
     }));
+    savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('重新提交案卷', `案卷ID: ${dossierId}`);
+    return true;
+  },
+
+  getDossiersByCourtroom: (courtroomId) => {
+    return get().dossiers.filter((d) => d.courtroomId === courtroomId);
   },
 }));
+
+useDossierStore.subscribe((state) => {
+  savePersist(PERSIST_KEY, state.dossiers);
+});
 
 export { STAGE_MAP };

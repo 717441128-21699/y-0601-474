@@ -342,6 +342,7 @@ export const mockDossiers: Dossier[] = [
     submittedAt: '2026-06-14 16:00:00',
     status: 'approved',
     pages: 156,
+    courtroomId: 'cr1',
     materials: ['起诉状', '证据清单', '证人证言', '鉴定报告', '讯问笔录'],
     reviewHistory: [
       { stage: '格式校验', reviewer: '张书记员', result: 'pass', comment: '格式规范，页码完整', timestamp: '2026-06-14 16:30:00' },
@@ -357,6 +358,7 @@ export const mockDossiers: Dossier[] = [
     submittedAt: '2026-06-14 17:00:00',
     status: 'chief_review',
     pages: 89,
+    courtroomId: 'cr2',
     materials: ['起诉状', '合同文本', '往来函件', '付款凭证'],
     reviewHistory: [
       { stage: '格式校验', reviewer: '孙书记员', result: 'pass', comment: '格式符合规范', timestamp: '2026-06-14 17:20:00' },
@@ -371,6 +373,7 @@ export const mockDossiers: Dossier[] = [
     submittedAt: '2026-06-15 09:00:00',
     status: 'format_rejected',
     pages: 234,
+    courtroomId: 'cr1',
     formatErrors: ['缺少证据目录第3页', '讯问笔录缺少签字', '页码标注不连续(56-58页缺失)', '卷宗封面未填写案号'],
     rejectReason: '格式校验不通过，存在4处问题，请补正后重新提交',
     materials: ['起诉状', '证据清单(部分)', '银行流水'],
@@ -386,6 +389,7 @@ export const mockDossiers: Dossier[] = [
     submittedAt: '2026-06-15 10:00:00',
     status: 'initial_review',
     pages: 45,
+    courtroomId: 'cr3',
     materials: ['行政复议申请书', '行政决定书', '证据材料'],
     reviewHistory: [
       { stage: '格式校验', reviewer: '朱书记员', result: 'pass', comment: '格式检查通过', timestamp: '2026-06-15 10:20:00' },
@@ -399,6 +403,7 @@ export const mockDossiers: Dossier[] = [
     submittedAt: '2026-06-15 11:00:00',
     status: 'format_checking',
     pages: 67,
+    courtroomId: 'cr5',
     materials: ['起诉状', '结婚证', '财产清单', '子女证明'],
     reviewHistory: [],
   },

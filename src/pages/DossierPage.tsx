@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { useDossierStore, STAGE_MAP } from '../store/useDossierStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { DossierScene3D } from '../components/three/DossierScene3D';
 import type { Dossier, DossierStatus } from '../types';
 
@@ -44,7 +45,9 @@ export const DossierPage: React.FC = () => {
     initialReview,
     chiefReview,
     resubmitDossier,
+    canPerformAction,
   } = useDossierStore();
+  const { currentUser } = useAuthStore();
 
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [rejectModalType, setRejectModalType] = useState<RejectModalType>(null);
@@ -211,27 +214,34 @@ export const DossierPage: React.FC = () => {
     const s = selectedDossier.status;
 
     if (s === 'submitted' || s === 'format_checking') {
+      const canFormatCheck = canPerformAction('format_check');
       return (
-        <div className="flex gap-3 justify-end">
-          <button
-            onClick={() => openRejectModal('format')}
-            className="btn-danger text-sm py-2 px-5 flex items-center gap-2"
-          >
-            <XCircle size={16} />
-            格式校验退回
-          </button>
-          <button
-            onClick={handleFormatCheck}
-            className="btn-primary text-sm py-2 px-5 flex items-center gap-2"
-          >
-            <CheckCircle size={16} />
-            格式校验通过
-          </button>
+        <div className="space-y-2">
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => canFormatCheck && openRejectModal('format')}
+              className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canFormatCheck ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <XCircle size={16} />
+              格式校验退回
+            </button>
+            <button
+              onClick={() => canFormatCheck && handleFormatCheck()}
+              className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canFormatCheck ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <CheckCircle size={16} />
+              格式校验通过
+            </button>
+          </div>
+          {!canFormatCheck && (
+            <p className="text-xs text-slate-500 text-right">书记员操作</p>
+          )}
         </div>
       );
     }
 
     if (s === 'initial_review') {
+      const canInitialReview = canPerformAction('initial_review');
       return (
         <div className="space-y-3">
           <input
@@ -239,29 +249,36 @@ export const DossierPage: React.FC = () => {
             placeholder="填写初审意见（可选）..."
             value={reviewComment}
             onChange={(e) => setReviewComment(e.target.value)}
-            className="input-field text-sm w-full"
+            className={`input-field text-sm w-full ${!canInitialReview ? 'opacity-50' : ''}`}
+            disabled={!canInitialReview}
           />
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => openRejectModal('initial')}
-              className="btn-danger text-sm py-2 px-5 flex items-center gap-2"
-            >
-              <XCircle size={16} />
-              初审退回
-            </button>
-            <button
-              onClick={handleInitialReviewPass}
-              className="btn-primary text-sm py-2 px-5 flex items-center gap-2"
-            >
-              <CheckCircle size={16} />
-              初审通过
-            </button>
+          <div className="space-y-2">
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => canInitialReview && openRejectModal('initial')}
+                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canInitialReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <XCircle size={16} />
+                初审退回
+              </button>
+              <button
+                onClick={() => canInitialReview && handleInitialReviewPass()}
+                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canInitialReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <CheckCircle size={16} />
+                初审通过
+              </button>
+            </div>
+            {!canInitialReview && (
+              <p className="text-xs text-slate-500 text-right">法官操作</p>
+            )}
           </div>
         </div>
       );
     }
 
     if (s === 'chief_review') {
+      const canChiefReview = canPerformAction('chief_review');
       return (
         <div className="space-y-3">
           <input
@@ -269,38 +286,50 @@ export const DossierPage: React.FC = () => {
             placeholder="填写庭长审批意见（可选）..."
             value={reviewComment}
             onChange={(e) => setReviewComment(e.target.value)}
-            className="input-field text-sm w-full"
+            className={`input-field text-sm w-full ${!canChiefReview ? 'opacity-50' : ''}`}
+            disabled={!canChiefReview}
           />
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => openRejectModal('chief')}
-              className="btn-danger text-sm py-2 px-5 flex items-center gap-2"
-            >
-              <XCircle size={16} />
-              庭长退回
-            </button>
-            <button
-              onClick={handleChiefReviewPass}
-              className="btn-primary text-sm py-2 px-5 flex items-center gap-2"
-            >
-              <CheckCircle size={16} />
-              庭长批准
-            </button>
+          <div className="space-y-2">
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => canChiefReview && openRejectModal('chief')}
+                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canChiefReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <XCircle size={16} />
+                庭长退回
+              </button>
+              <button
+                onClick={() => canChiefReview && handleChiefReviewPass()}
+                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canChiefReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <CheckCircle size={16} />
+                庭长批准
+              </button>
+            </div>
+            {!canChiefReview && (
+              <p className="text-xs text-slate-500 text-right">庭长/院长操作</p>
+            )}
           </div>
         </div>
       );
     }
 
     if (s.includes('rejected')) {
+      const canResubmit = canPerformAction('submit');
       return (
-        <div className="flex justify-end">
-          <button
-            onClick={handleResubmit}
-            className="btn-primary text-sm py-2 px-5 flex items-center gap-2"
-          >
-            <RotateCw size={16} />
-            重新提交
-          </button>
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <button
+              onClick={() => canResubmit && handleResubmit()}
+              className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canResubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <RotateCw size={16} />
+              重新提交
+            </button>
+          </div>
+          {!canResubmit && (
+            <p className="text-xs text-slate-500 text-right">书记员操作</p>
+          )}
         </div>
       );
     }
@@ -340,13 +369,18 @@ export const DossierPage: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => setShowSubmitModal(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus size={18} />
-          提交新案卷
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={() => canPerformAction('submit') && setShowSubmitModal(true)}
+            className={`btn-primary flex items-center gap-2 ${!canPerformAction('submit') ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <Plus size={18} />
+            提交新案卷
+          </button>
+          {!canPerformAction('submit') && (
+            <span className="text-xs text-slate-500">无提交权限</span>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6 h-[calc(100vh-200px)]">
@@ -428,7 +462,8 @@ export const DossierPage: React.FC = () => {
                           <Eye size={12} />
                           查看
                         </button>
-                        {(d.status === 'initial_review' || d.status === 'chief_review') && (
+                        {(d.status === 'initial_review' && canPerformAction('initial_review')) ||
+                        (d.status === 'chief_review' && canPerformAction('chief_review')) ? (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -439,7 +474,7 @@ export const DossierPage: React.FC = () => {
                             <Gavel size={12} />
                             审批
                           </button>
-                        )}
+                        ) : null}
                       </td>
                     </tr>
                   ))}

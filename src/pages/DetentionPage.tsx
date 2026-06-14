@@ -148,7 +148,7 @@ export const DetentionPage: React.FC = () => {
           missionId: m.id,
           points: m.pathPoints,
           progress: m.progress,
-          color: m.status === 'overdue' ? '#EF4444' : '#3B82F6',
+          alarm: m.status === 'overdue',
         })),
     [missions]
   );
@@ -240,61 +240,126 @@ export const DetentionPage: React.FC = () => {
           0%, 100% { background-color: rgba(239, 68, 68, 0.15); }
           50% { background-color: rgba(239, 68, 68, 0.4); }
         }
+        @keyframes alarmBannerPulse {
+          0%, 100% { 
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3), inset 0 0 20px rgba(239, 68, 68, 0.05);
+            border-color: rgba(239, 68, 68, 0.5);
+          }
+          50% { 
+            box-shadow: 0 0 30px 5px rgba(239, 68, 68, 0.25), inset 0 0 30px rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.8);
+          }
+        }
+        @keyframes alarmRowFlash {
+          0%, 100% { background-color: rgba(239, 68, 68, 0.1); }
+          50% { background-color: rgba(239, 68, 68, 0.25); }
+        }
         .alarm-row {
           animation: alarmBorderPulse 1.5s ease-in-out infinite;
         }
         .siren-bg {
           animation: sirenBlink 0.8s ease-in-out infinite;
         }
+        .alarm-banner {
+          animation: alarmBannerPulse 2s ease-in-out infinite;
+        }
+        .alarm-item-flash {
+          animation: alarmRowFlash 1.2s ease-in-out infinite;
+        }
       `}</style>
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-court-blue to-court-blue/70 flex items-center justify-center shadow-glow-blue">
-            <ShieldAlert className="text-white" size={24} />
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-court-blue to-court-blue/70 flex items-center justify-center shadow-glow-blue">
+              <ShieldAlert className="text-white" size={24} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-serif font-bold text-court-goldLight tracking-wide">
+                羁押安全监控中心
+              </h1>
+              <p className="text-sm text-slate-400 flex items-center gap-2 mt-1">
+                <Clock size={14} />
+                {new Date().toLocaleDateString('zh-CN', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                  weekday: 'long',
+                })}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-serif font-bold text-court-goldLight tracking-wide">
-              羁押安全监控中心
-            </h1>
-            <p className="text-sm text-slate-400 flex items-center gap-2 mt-1">
-              <Clock size={14} />
-              {new Date().toLocaleDateString('zh-CN', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                weekday: 'long',
-              })}
-            </p>
+
+          <div className="grid grid-cols-4 gap-4">
+            <DataCard
+              title="总羁押人数"
+              value={totalDetainees}
+              icon={Users}
+              color="gold"
+            />
+            <DataCard
+              title="进行中押解"
+              value={escortingCount}
+              icon={MapPinHouse}
+              color="blue"
+            />
+            <DataCard
+              title="超期警报数"
+              value={overdueCount}
+              icon={AlertOctagon}
+              color="red"
+            />
+            <DataCard
+              title="空房间数"
+              value={emptyRoomCount}
+              icon={UserX}
+              color="green"
+            />
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
-          <DataCard
-            title="总羁押人数"
-            value={totalDetainees}
-            icon={Users}
-            color="gold"
-          />
-          <DataCard
-            title="进行中押解"
-            value={escortingCount}
-            icon={MapPinHouse}
-            color="blue"
-          />
-          <DataCard
-            title="超期警报数"
-            value={overdueCount}
-            icon={AlertOctagon}
-            color="red"
-          />
-          <DataCard
-            title="空房间数"
-            value={emptyRoomCount}
-            icon={UserX}
-            color="green"
-          />
-        </div>
+        {activeAlarmsData.length > 0 && (
+          <div className="alarm-banner border border-court-red/50 rounded-xl p-4 bg-gradient-to-r from-court-red/20 via-court-red/10 to-court-red/20 backdrop-blur-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-court-red/20 flex items-center justify-center animate-pulse">
+                  <AlertOctagon className="text-court-red" size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-court-red font-bold text-lg">
+                      活跃警报
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-court-red/30 text-court-red text-xs font-bold border border-court-red/50">
+                      {activeAlarmsData.length} 条
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    以下押解任务已超期，请及时处置
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {activeAlarmsData.slice(0, 3).map((mission, idx) => (
+                  <div
+                    key={mission.id}
+                    className="px-3 py-1.5 rounded-lg bg-court-red/15 border border-court-red/40 text-xs"
+                  >
+                    <span className="text-court-red font-medium">{mission.detaineeName}</span>
+                    <span className="text-slate-400 ml-1">
+                      {getOverdueDuration(mission.startTime, mission.expectedReturn)}
+                    </span>
+                  </div>
+                ))}
+                {activeAlarmsData.length > 3 && (
+                  <span className="text-xs text-slate-400">
+                    +{activeAlarmsData.length - 3} 条
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-20 gap-6 h-[calc(100vh-220px)]" style={{ gridTemplateColumns: '55% 1fr' }}>
@@ -321,7 +386,7 @@ export const DetentionPage: React.FC = () => {
             courtrooms={courtrooms}
             cases={cases}
             detentionRooms={rooms}
-            escortPaths={escortPaths as { missionId: string; points: { x: number; y: number; z: number }[]; progress: number }[]}
+            escortPaths={escortPaths as { missionId: string; points: { x: number; y: number; z: number }[]; progress: number; alarm?: boolean }[]}
             selectedDetentionId={selectedRoom?.id}
             onDetentionClick={(id) => {
               const dr = rooms.find((x) => x.id === id);
@@ -547,13 +612,13 @@ export const DetentionPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 32%' }}>
+          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 35%' }}>
             <div className="section-title px-5 pt-4">
-              <AlertTriangle size={16} className="text-court-red" />
-              警报处置面板
+              <AlertOctagon size={16} className="text-court-red" />
+              活跃警报
               {activeAlarmsData.length > 0 && (
-                <span className="ml-2 px-2 py-0.5 rounded-full bg-court-red/20 text-court-red text-xs border border-court-red/40 animate-pulse">
-                  {activeAlarmsData.length}
+                <span className="ml-2 px-2.5 py-0.5 rounded-full bg-court-red/20 text-court-red text-xs font-bold border border-court-red/40 animate-pulse">
+                  {activeAlarmsData.length} 条
                 </span>
               )}
             </div>
@@ -563,13 +628,14 @@ export const DetentionPage: React.FC = () => {
                   const alarmInfo = getAlarmLevel(mission);
                   const isHandled = isAlarmFullyHandled(mission.id);
                   const actions = alarmActions[mission.id] || { contacted: false, forced: false, reported: false };
+                  const isDisposing = actions.contacted && !actions.forced;
                   return (
                     <div
                       key={mission.id}
                       className={`border rounded-xl p-4 transition-all ${
                         isHandled
                           ? 'border-court-green/30 bg-court-green/5'
-                          : 'border-court-red/40 bg-court-red/10'
+                          : `border-court-red/40 ${!isHandled ? 'alarm-item-flash' : 'bg-court-red/10'}`
                       }`}
                     >
                       <div className="flex items-start justify-between mb-3">
@@ -585,74 +651,66 @@ export const DetentionPage: React.FC = () => {
                           </span>
                         </div>
                         <span
-                          className={`text-[10px] px-2 py-0.5 rounded ${
+                          className={`text-[10px] px-2 py-0.5 rounded font-medium ${
                             isHandled
                               ? 'bg-court-green/20 text-court-green border border-court-green/30'
-                              : 'bg-court-orange/20 text-court-orange border border-court-orange/30'
+                              : isDisposing
+                              ? 'bg-court-orange/20 text-court-orange border border-court-orange/30'
+                              : 'bg-court-red/20 text-court-red border border-court-red/30'
                           }`}
                         >
-                          {isHandled ? '已处置' : '待处置'}
+                          {isHandled ? '已归位' : isDisposing ? '处置中' : '待处置'}
                         </span>
                       </div>
 
                       <div className="mb-3">
-                        <p className="text-sm text-slate-200 mb-1">
-                          <span className="font-medium">{mission.detaineeName}</span>
-                          <span className="text-slate-400 text-xs ml-2">
-                            {mission.fromRoom} → {mission.toCourtroom}
-                          </span>
+                        <p className="text-sm text-slate-200 mb-1 font-medium">
+                          {mission.detaineeName}
                         </p>
-                        <div className="flex items-center gap-1 text-xs text-court-red">
-                          <AlertOctagon size={12} />
-                          <span>超期时长: {getOverdueDuration(mission.startTime, mission.expectedReturn)}</span>
+                        <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
+                          <MapPinHouse size={10} />
+                          <span>{mission.fromRoom} → {mission.toCourtroom}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-court-red font-medium">
+                          <AlertTriangle size={12} />
+                          <span>超期 {getOverdueDuration(mission.startTime, mission.expectedReturn)}</span>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="flex gap-2">
                         <button
                           onClick={() => handleAlarmContact(mission.id)}
-                          disabled={actions.contacted}
-                          className={`py-2 rounded-lg text-xs flex flex-col items-center gap-1 transition-all ${
+                          disabled={actions.contacted || actions.forced}
+                          className={`flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all ${
                             actions.contacted
                               ? 'bg-court-green/15 text-court-green border border-court-green/30'
                               : 'bg-court-card border border-court-border text-slate-300 hover:border-court-blue/50 hover:text-court-blue'
                           }`}
                         >
-                          {actions.contacted ? <Check size={14} /> : <Phone size={14} />}
-                          <span>{actions.contacted ? '已联系' : '立即联系'}</span>
+                          {actions.contacted ? <Check size={12} /> : <Phone size={12} />}
+                          <span>{actions.contacted ? '已联系' : '处置中'}</span>
                         </button>
                         <button
                           onClick={() => handleAlarmForce(mission.id)}
                           disabled={actions.forced}
-                          className={`py-2 rounded-lg text-xs flex flex-col items-center gap-1 transition-all ${
+                          className={`flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all ${
                             actions.forced
                               ? 'bg-court-green/15 text-court-green border border-court-green/30'
-                              : 'bg-court-card border border-court-border text-slate-300 hover:border-court-orange/50 hover:text-court-orange'
+                              : 'bg-court-red/15 text-court-red border border-court-red/40 hover:bg-court-red/25'
                           }`}
                         >
-                          {actions.forced ? <Check size={14} /> : <Siren size={14} />}
-                          <span>{actions.forced ? '已归位' : '强制归位'}</span>
-                        </button>
-                        <button
-                          onClick={() => handleAlarmSend(mission.id)}
-                          disabled={actions.reported}
-                          className={`py-2 rounded-lg text-xs flex flex-col items-center gap-1 transition-all ${
-                            actions.reported
-                              ? 'bg-court-green/15 text-court-green border border-court-green/30'
-                              : 'bg-court-card border border-court-border text-slate-300 hover:border-court-gold/50 hover:text-court-gold'
-                          }`}
-                        >
-                          {actions.reported ? <Check size={14} /> : <Send size={14} />}
-                          <span>{actions.reported ? '已上报' : '上报领导'}</span>
+                          {actions.forced ? <Check size={12} /> : <UserCheck size={12} />}
+                          <span>{actions.forced ? '已归位' : '确认归位'}</span>
                         </button>
                       </div>
                     </div>
                   );
                 })}
                 {activeAlarmsData.length === 0 && (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 py-6">
-                    <Shield size={32} className="text-court-green/40 mb-2" />
-                    <p className="text-sm">暂无警报，状态正常</p>
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 py-8">
+                    <Shield size={36} className="text-court-green/40 mb-3" />
+                    <p className="text-sm">暂无活跃警报</p>
+                    <p className="text-xs text-slate-500 mt-1">所有押解任务正常</p>
                   </div>
                 )}
               </div>

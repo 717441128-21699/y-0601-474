@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { User, UserRole, OperationLog } from '../types';
 import { mockUsers, mockOperationLogs } from '../data/mockData';
+import { loadPersist, savePersist } from './persist';
 
 interface AuthState {
   currentUser: User | null;
@@ -15,7 +16,16 @@ interface AuthState {
   setSelectedRole: (role: UserRole) => void;
   checkPermission: (requiredRole: UserRole[]) => boolean;
   recordLog: (action: string, target: string) => void;
+  persistState: () => void;
 }
+
+const PERSIST_KEY = 'auth-store';
+
+const persisted = loadPersist<{
+  currentUser: User | null;
+  isLoggedIn: boolean;
+  operationLogs: OperationLog[];
+}>(PERSIST_KEY);
 
 const roleOrder: Record<UserRole, number> = {
   clerk: 1,
@@ -25,12 +35,12 @@ const roleOrder: Record<UserRole, number> = {
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  currentUser: null,
-  isLoggedIn: false,
+  currentUser: persisted?.currentUser || null,
+  isLoggedIn: persisted?.isLoggedIn || false,
   isScanning: false,
   scanProgress: 0,
   selectedRole: null,
-  operationLogs: mockOperationLogs,
+  operationLogs: persisted?.operationLogs || mockOperationLogs,
 
   setSelectedRole: (role) => set({ selectedRole: role }),
 
@@ -59,6 +69,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const updatedUser = { ...user, lastLogin: new Date().toLocaleString('zh-CN') };
       set({ currentUser: updatedUser, isLoggedIn: true });
       get().recordLog('登录系统', '系统登录');
+      get().persistState();
       return true;
     }
     return false;
@@ -67,6 +78,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: () => {
     get().recordLog('登出系统', '系统登出');
     set({ currentUser: null, isLoggedIn: false, selectedRole: null });
+    get().persistState();
   },
 
   checkPermission: (requiredRole) => {
@@ -89,5 +101,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       ip: '192.168.1.100',
     };
     set((state) => ({ operationLogs: [newLog, ...state.operationLogs] }));
+    get().persistState();
+  },
+
+  persistState: () => {
+    const { currentUser, isLoggedIn, operationLogs } = get();
+    savePersist(PERSIST_KEY, { currentUser, isLoggedIn, operationLogs });
   },
 }));
+
+useAuthStore.subscribe((state) => {
+  savePersist(PERSIST_KEY, {
+    currentUser: state.currentUser,
+    isLoggedIn: state.isLoggedIn,
+    operationLogs: state.operationLogs,
+  });
+});

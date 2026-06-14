@@ -205,9 +205,19 @@ interface EscortPathProps {
   points: { x: number; y: number; z: number }[];
   progress: number;
   color?: string;
+  isAlarm?: boolean;
 }
 
-function EscortPath({ points, progress, color = '#3B82F6' }: EscortPathProps) {
+function EscortPath({ points, progress, color = '#3B82F6', isAlarm = false }: EscortPathProps) {
+  const lineRef = useRef<any>(null);
+  const startMarkerRef = useRef<THREE.Mesh>(null);
+  const endMarkerRef = useRef<THREE.Mesh>(null);
+  const pulseRef = useRef<THREE.Mesh>(null);
+
+  const pathColor = isAlarm ? '#EF4444' : color;
+  const baseLineWidth = isAlarm ? 5 : 3;
+  const baseOpacity = isAlarm ? 1 : 0.9;
+
   const interpolatedPoints = useMemo(() => {
     const result: [number, number, number][] = [];
     for (let i = 0; i < points.length - 1; i++) {
@@ -234,21 +244,109 @@ function EscortPath({ points, progress, color = '#3B82F6' }: EscortPathProps) {
     return new THREE.Vector3(...interpolatedPoints[idx]);
   }, [progress, interpolatedPoints]);
 
+  const startPoint = useMemo(() => {
+    if (points.length === 0) return new THREE.Vector3();
+    return new THREE.Vector3(points[0].x, 0.3, points[0].z);
+  }, [points]);
+
+  const endPoint = useMemo(() => {
+    if (points.length === 0) return new THREE.Vector3();
+    return new THREE.Vector3(points[points.length - 1].x, 0.3, points[points.length - 1].z);
+  }, [points]);
+
+  useFrame((state) => {
+    if (isAlarm) {
+      const pulse = (Math.sin(state.clock.elapsedTime * 3) + 1) / 2;
+      
+      if (lineRef.current) {
+        lineRef.current.opacity = baseOpacity - pulse * 0.3;
+      }
+      
+      if (startMarkerRef.current) {
+        const mat = startMarkerRef.current.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.3 + pulse * 0.7;
+      }
+      if (endMarkerRef.current) {
+        const mat = endMarkerRef.current.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.3 + pulse * 0.7;
+      }
+      
+      if (pulseRef.current) {
+        const mat = pulseRef.current.material as THREE.MeshBasicMaterial;
+        const scale = 1 + pulse * 0.8;
+        pulseRef.current.scale.set(scale, scale, scale);
+        mat.opacity = 0.6 - pulse * 0.4;
+      }
+    }
+  });
+
   return (
     <group>
       <Line
+        ref={lineRef}
         points={interpolatedPoints}
-        color={color}
-        lineWidth={3}
+        color={pathColor}
+        lineWidth={baseLineWidth}
         transparent
-        opacity={0.9}
+        opacity={baseOpacity}
       />
+      
+      {isAlarm && (
+        <>
+          <mesh ref={startMarkerRef} position={startPoint}>
+            <ringGeometry args={[0.25, 0.35, 32]} />
+            <meshBasicMaterial
+              color={pathColor}
+              transparent
+              opacity={0.8}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          <mesh position={[startPoint.x, 0.31, startPoint.z]}>
+            <circleGeometry args={[0.15, 32]} />
+            <meshBasicMaterial
+              color={pathColor}
+              transparent
+              opacity={0.9}
+            />
+          </mesh>
+          
+          <mesh ref={endMarkerRef} position={endPoint}>
+            <ringGeometry args={[0.25, 0.35, 32]} />
+            <meshBasicMaterial
+              color={pathColor}
+              transparent
+              opacity={0.8}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          <mesh position={[endPoint.x, 0.31, endPoint.z]}>
+            <circleGeometry args={[0.15, 32]} />
+            <meshBasicMaterial
+              color={pathColor}
+              transparent
+              opacity={0.9}
+            />
+          </mesh>
+          
+          <mesh ref={pulseRef} position={markerPos}>
+            <ringGeometry args={[0.2, 0.3, 32]} />
+            <meshBasicMaterial
+              color={pathColor}
+              transparent
+              opacity={0.6}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        </>
+      )}
+      
       <mesh position={markerPos}>
-        <sphereGeometry args={[0.18, 20, 20]} />
+        <sphereGeometry args={[isAlarm ? 0.22 : 0.18, 20, 20]} />
         <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={1.5}
+          color={pathColor}
+          emissive={pathColor}
+          emissiveIntensity={isAlarm ? 2 : 1.5}
         />
       </mesh>
       <Float speed={4} rotationIntensity={0} floatIntensity={0.5}>
@@ -256,8 +354,8 @@ function EscortPath({ points, progress, color = '#3B82F6' }: EscortPathProps) {
           <coneGeometry args={[0.12, 0.3, 6]} />
           <meshStandardMaterial
             color="#FFFFFF"
-            emissive={color}
-            emissiveIntensity={0.8}
+            emissive={pathColor}
+            emissiveIntensity={isAlarm ? 1.2 : 0.8}
           />
         </mesh>
       </Float>
@@ -298,7 +396,7 @@ export interface CourtScene3DProps {
   courtrooms: Courtroom[];
   cases: CourtCase[];
   detentionRooms: DetentionRoom[];
-  escortPaths?: { missionId: string; points: { x: number; y: number; z: number }[]; progress: number }[];
+  escortPaths?: { missionId: string; points: { x: number; y: number; z: number }[]; progress: number; alarm?: boolean }[];
   selectedCourtroomId?: string | null;
   selectedDetentionId?: string | null;
   onCourtroomClick?: (id: string) => void;
@@ -372,6 +470,7 @@ export const CourtScene3D: React.FC<CourtScene3DProps> = ({
           points={ep.points}
           progress={ep.progress}
           color={ep.progress >= 100 ? '#10B981' : '#3B82F6'}
+          isAlarm={ep.alarm}
         />
       ))}
 

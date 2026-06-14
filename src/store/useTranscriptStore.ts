@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Transcript } from '../types';
 import { mockTranscripts } from '../data/mockData';
 import { useAuthStore } from './useAuthStore';
+import { loadPersist, savePersist } from './persist';
 
 interface TranscriptState {
   transcripts: Transcript[];
@@ -13,10 +14,17 @@ interface TranscriptState {
   markFieldComplete: (id: string, field: keyof Transcript['keyFields'], value: boolean) => void;
   finalizeTranscript: (id: string) => void;
   calculateMissingItems: (t: Transcript) => string[];
+  persistState: () => void;
 }
 
+const PERSIST_KEY = 'transcript-store';
+
+const persisted = loadPersist<{
+  transcripts: Transcript[];
+}>(PERSIST_KEY);
+
 export const useTranscriptStore = create<TranscriptState>((set, get) => ({
-  transcripts: mockTranscripts,
+  transcripts: persisted?.transcripts || mockTranscripts,
   selectedTranscript: null,
 
   setSelectedTranscript: (t) => set({ selectedTranscript: t }),
@@ -43,6 +51,7 @@ export const useTranscriptStore = create<TranscriptState>((set, get) => ({
           : t
       ),
     }));
+    get().persistState();
   },
 
   validateTranscript: (id) => {
@@ -68,6 +77,7 @@ export const useTranscriptStore = create<TranscriptState>((set, get) => ({
       complete ? '笔录校验通过' : '笔录校验未通过',
       `${t.caseNumber}, 缺失${missing.length}项`
     );
+    get().persistState();
 
     return { complete, missing };
   },
@@ -85,6 +95,7 @@ export const useTranscriptStore = create<TranscriptState>((set, get) => ({
       '发送笔录催办',
       `${t.caseNumber}, 第${t.remindersSent + 1}次催办`
     );
+    get().persistState();
   },
 
   markFieldComplete: (id, field, value) => {
@@ -105,6 +116,7 @@ export const useTranscriptStore = create<TranscriptState>((set, get) => ({
     if (user) {
       useAuthStore.getState().recordLog('更新笔录关键字段', `笔录ID: ${id}`);
     }
+    get().persistState();
   },
 
   finalizeTranscript: (id) => {
@@ -120,5 +132,17 @@ export const useTranscriptStore = create<TranscriptState>((set, get) => ({
     if (t) {
       useAuthStore.getState().recordLog('笔录归档完成', t.caseNumber);
     }
+    get().persistState();
+  },
+
+  persistState: () => {
+    const { transcripts } = get();
+    savePersist(PERSIST_KEY, { transcripts });
   },
 }));
+
+useTranscriptStore.subscribe((state) => {
+  savePersist(PERSIST_KEY, {
+    transcripts: state.transcripts,
+  });
+});

@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import type { DetentionRoom, EscortMission } from '../types';
 import { mockDetentionRooms, mockEscortMissions } from '../data/mockData';
 import { useAuthStore } from './useAuthStore';
+import { loadPersist, savePersist } from './persist';
+
+const PERSIST_KEY = 'detention-store';
+const missionTimeoutMap = new Map<string, ReturnType<typeof setTimeout>>();
 
 interface DetentionState {
   rooms: DetentionRoom[];
@@ -20,10 +24,18 @@ interface DetentionState {
   getEscortingCount: () => number;
 }
 
+interface PersistedState {
+  rooms: DetentionRoom[];
+  missions: EscortMission[];
+  activeAlarms: string[];
+}
+
+const persisted = loadPersist<PersistedState>(PERSIST_KEY);
+
 export const useDetentionStore = create<DetentionState>((set, get) => ({
-  rooms: mockDetentionRooms,
-  missions: mockEscortMissions,
-  activeAlarms: ['e2'],
+  rooms: persisted?.rooms || mockDetentionRooms,
+  missions: persisted?.missions || mockEscortMissions,
+  activeAlarms: persisted?.activeAlarms || ['e2'],
   selectedRoom: null,
   selectedMission: null,
 
@@ -78,7 +90,21 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
           : r
       ),
     }));
+    savePersist(PERSIST_KEY, {
+      rooms: get().rooms,
+      missions: get().missions,
+      activeAlarms: get().activeAlarms,
+    });
     useAuthStore.getState().recordLog('发起押解任务', `${detainee.name} -> ${courtroomName}`);
+
+    const timeoutId = setTimeout(() => {
+      const current = get().missions.find((m) => m.id === mission.id);
+      if (current && current.status !== 'completed') {
+        get().triggerAlarm(mission.id);
+      }
+      missionTimeoutMap.delete(mission.id);
+    }, 60 * 1000);
+    missionTimeoutMap.set(mission.id, timeoutId);
 
     setTimeout(() => {
       const interval = setInterval(() => {
@@ -106,6 +132,11 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
               ),
             })),
           }));
+          savePersist(PERSIST_KEY, {
+            rooms: get().rooms,
+            missions: get().missions,
+            activeAlarms: get().activeAlarms,
+          });
         }
       }, 2000);
     }, 1000);
@@ -114,6 +145,12 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
   completeMission: (missionId) => {
     const mission = get().missions.find((m) => m.id === missionId);
     if (!mission) return;
+
+    const timeoutId = missionTimeoutMap.get(missionId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      missionTimeoutMap.delete(missionId);
+    }
 
     set((s) => ({
       missions: s.missions.map((m) =>
@@ -127,6 +164,11 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
       })),
       activeAlarms: s.activeAlarms.filter((id) => id !== missionId),
     }));
+    savePersist(PERSIST_KEY, {
+      rooms: get().rooms,
+      missions: get().missions,
+      activeAlarms: get().activeAlarms,
+    });
     useAuthStore.getState().recordLog('完成押解任务', mission.detaineeName);
   },
 
@@ -136,6 +178,11 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
         m.id === missionId ? { ...m, progress } : m
       ),
     }));
+    savePersist(PERSIST_KEY, {
+      rooms: get().rooms,
+      missions: get().missions,
+      activeAlarms: get().activeAlarms,
+    });
   },
 
   triggerAlarm: (missionId) => {
@@ -147,6 +194,11 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
         m.id === missionId ? { ...m, status: 'overdue' } : m
       ),
     }));
+    savePersist(PERSIST_KEY, {
+      rooms: get().rooms,
+      missions: get().missions,
+      activeAlarms: get().activeAlarms,
+    });
     const mission = get().missions.find((m) => m.id === missionId);
     if (mission) {
       useAuthStore.getState().recordLog('触发押解超时警报', `${mission.detaineeName} 超30分钟未归`);
@@ -157,5 +209,18 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
     set((s) => ({
       activeAlarms: s.activeAlarms.filter((id) => id !== missionId),
     }));
+    savePersist(PERSIST_KEY, {
+      rooms: get().rooms,
+      missions: get().missions,
+      activeAlarms: get().activeAlarms,
+    });
   },
 }));
+
+useDetentionStore.subscribe((state) => {
+  savePersist(PERSIST_KEY, {
+    rooms: state.rooms,
+    missions: state.missions,
+    activeAlarms: state.activeAlarms,
+  });
+});

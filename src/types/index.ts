@@ -70,6 +70,7 @@ export interface Dossier {
   submittedAt: string;
   status: DossierStatus;
   pages: number;
+  courtroomId?: string;
   formatErrors?: string[];
   rejectReason?: string;
   reviewHistory: {
