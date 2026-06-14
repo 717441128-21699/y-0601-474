@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: '"Source Han Sans SC"', '"Noto Sans SC"', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #E2E8F0;
+  background-color: #0A1628;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  body {
+    @apply bg-court-bg text-slate-200 min-h-screen;
+    background-image: 
+      radial-gradient(ellipse at top, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(201, 168, 108, 0.05) 0%, transparent 50%);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #112240;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2A3F5F;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #C9A86C;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-court-card/70 backdrop-blur-md border border-court-border rounded-lg shadow-card;
+  }
+
+  .glass-panel {
+    @apply bg-court-panel/80 backdrop-blur-xl border border-court-border rounded-xl shadow-card;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-gradient-to-r from-court-gold to-court-goldLight text-court-bg font-medium rounded-lg
+           hover:shadow-glow-gold transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-court-card border border-court-border text-slate-200 font-medium rounded-lg
+           hover:border-court-gold hover:text-court-gold transition-all duration-300 active:scale-95;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-court-red/20 border border-court-red text-court-red font-medium rounded-lg
+           hover:bg-court-red/30 hover:shadow-glow-red transition-all duration-300;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 bg-court-bg border border-court-border rounded-lg text-slate-200
+           placeholder-slate-500 focus:border-court-gold focus:ring-1 focus:ring-court-gold/50
+           outline-none transition-all duration-200;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full;
+  }
+
+  .section-title {
+    @apply font-serif text-lg font-semibold text-court-goldLight mb-4 flex items-center gap-2
+           border-b border-court-border pb-2;
+  }
+}
