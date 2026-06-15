@@ -4,20 +4,20 @@ import { mockCases, mockCourtrooms, mockApprovals } from '../data/mockData';
 import { useAuthStore } from './useAuthStore';
 import { loadPersist, savePersist } from './persist';
 
-interface ConflictInfo {
+export interface ConflictInfo {
   hasConflict: boolean;
   type: 'none' | 'high-high' | 'high-low' | 'overlap';
   conflictingCase?: CourtCase;
 }
 
-interface SuitabilityInfo {
+export interface SuitabilityInfo {
   suitableTypes: CaseType[];
   hasRemoteTerminal: boolean;
   hasEvidenceDisplay: boolean;
   capacity: number;
 }
 
-interface CourtRecommendation {
+export interface CourtRecommendation {
   courtroom: Courtroom;
   score: number;
   reason: string;
@@ -37,9 +37,11 @@ interface CourtState {
   setSelectedCase: (c: CourtCase | null) => void;
   setSelectedCourtroom: (cr: Courtroom | null) => void;
   assignCourtroom: (caseId: string, courtroomId: string) => boolean;
-  detectConflict: (caseType: CaseType, priority: PriorityLevel, time: string, excludeCaseId?: string) => CourtCase | null;
-  isHighHighConflict: (caseType: CaseType, priority: PriorityLevel, time: string, excludeCaseId?: string) => boolean;
+  detectConflict: (caseType: CaseType, priority: PriorityLevel, time: string, courtroomId: string, excludeCaseId?: string) => CourtCase | null;
+  getTimeSlotOverlaps: (time: string, excludeCourtroomId?: string) => CourtCase[];
+  isHighHighConflict: (caseType: CaseType, priority: PriorityLevel, time: string, courtroomId: string, excludeCaseId?: string) => boolean;
   recommendCourtroom: (caseType: CaseType, priority: PriorityLevel, time: string, chiefJudge?: string) => CourtRecommendation | null;
+  recommendCourtrooms: (caseType: CaseType, priority: PriorityLevel, time: string, chiefJudge?: string) => CourtRecommendation[];
   submitApproval: (caseId: string, type: 'schedule_conflict' | 'dossier' | 'other', description?: string) => void;
   approveAtStage: (approvalId: string, stage: ApprovalStage, comment: string, result: 'approved' | 'rejected') => boolean;
   canApproveAtStage: (stage: ApprovalStage) => boolean;
@@ -68,25 +70,38 @@ export const useCourtStore = create<CourtState>((set, get) => ({
   setSelectedCase: (c) => set({ selectedCase: c }),
   setSelectedCourtroom: (cr) => set({ selectedCourtroom: cr }),
 
-  detectConflict: (caseType, priority, time, excludeCaseId) => {
+  detectConflict: (caseType, priority, time, courtroomId, excludeCaseId) => {
     const conflicting = get().cases.find((c) => {
       if (excludeCaseId && c.id === excludeCaseId) return false;
       return (
         c.scheduledTime === time &&
+        c.courtroomId === courtroomId &&
         c.status !== 'closed'
       );
     });
     return conflicting || null;
   },
 
-  isHighHighConflict: (caseType, priority, time, excludeCaseId) => {
-    const conflicting = get().detectConflict(caseType, priority, time, excludeCaseId);
+  getTimeSlotOverlaps: (time, excludeCourtroomId) => {
+    return get().cases.filter((c) => {
+      if (excludeCourtroomId && c.courtroomId === excludeCourtroomId) return false;
+      return c.scheduledTime === time && c.status !== 'closed';
+    });
+  },
+
+  isHighHighConflict: (caseType, priority, time, courtroomId, excludeCaseId) => {
+    const conflicting = get().detectConflict(caseType, priority, time, courtroomId, excludeCaseId);
     if (!conflicting) return false;
     return priority === 'high' && conflicting.priority === 'high';
   },
 
   recommendCourtroom: (caseType, priority, time, chiefJudge) => {
-    const { courtrooms, cases, detectConflict, isHighHighConflict } = get();
+    const top3 = get().recommendCourtrooms(caseType, priority, time, chiefJudge);
+    return top3.length > 0 ? top3[0] : null;
+  },
+
+  recommendCourtrooms: (caseType, priority, time, chiefJudge) => {
+    const { courtrooms, cases, detectConflict, isHighHighConflict, getTimeSlotOverlaps } = get();
 
     const caseTypeLabels: Record<CaseType, string> = {
       criminal: '刑事',
@@ -94,12 +109,12 @@ export const useCourtStore = create<CourtState>((set, get) => ({
       administrative: '行政',
     };
 
-    const buildConflictInfo = (): ConflictInfo => {
-      const conflicting = detectConflict(caseType, priority, time);
+    const buildConflictInfo = (room: Courtroom): ConflictInfo => {
+      const conflicting = detectConflict(caseType, priority, time, room.id);
       if (!conflicting) {
         return { hasConflict: false, type: 'none' };
       }
-      if (isHighHighConflict(caseType, priority, time)) {
+      if (isHighHighConflict(caseType, priority, time, room.id)) {
         return { hasConflict: true, type: 'high-high', conflictingCase: conflicting };
       }
       if (priority === 'high' || conflicting.priority === 'high') {
@@ -121,6 +136,8 @@ export const useCourtStore = create<CourtState>((set, get) => ({
       if (room.suitableTypes.includes(caseType)) {
         const suitableLabels = room.suitableTypes.map((t) => caseTypeLabels[t]).join('/');
         details.push(`法庭类型适配${suitableLabels}案件`);
+      } else {
+        details.push(`法庭类型非最佳适配`);
       }
 
       if (room.equipment.includes('远程庭审终端')) {
@@ -133,14 +150,19 @@ export const useCourtStore = create<CourtState>((set, get) => ({
 
       details.push(`${room.capacity}座容量保障`);
 
+      const overlaps = getTimeSlotOverlaps(time, room.id);
+      if (overlaps.length > 0) {
+        details.push(`其他法庭同时段有${overlaps.length}个排期（仅风险提示）`);
+      }
+
       if (!conflict.hasConflict) {
-        details.push('时段空闲无冲突');
+        details.push('本法庭此时段空闲无冲突');
       } else if (conflict.type === 'high-high') {
-        details.push(`时段冲突：与${conflict.conflictingCase?.caseNumber}高优先级案件撞期`);
+        details.push(`本法庭冲突：与${conflict.conflictingCase?.caseNumber}高优先级案件撞期（需三级审批）`);
       } else if (conflict.type === 'high-low') {
-        details.push(`时段重叠：与${conflict.conflictingCase?.caseNumber}案件撞期，高优先级优先安排`);
+        details.push(`本法庭重叠：与${conflict.conflictingCase?.caseNumber}案件撞期（高优先级优先安排）`);
       } else {
-        details.push(`时段重叠：与${conflict.conflictingCase?.caseNumber}案件同时段`);
+        details.push(`本法庭重叠：与${conflict.conflictingCase?.caseNumber}案件同时段`);
       }
 
       return details;
@@ -154,34 +176,17 @@ export const useCourtStore = create<CourtState>((set, get) => ({
       (r) => r.status === 'available' && !occupiedRoomIds.includes(r.id)
     );
 
-    const conflictInfo = buildConflictInfo();
-
+    let roomsToScore: Courtroom[] = [];
     if (availableRooms.length === 0) {
-      const anyAvailable = courtrooms.filter((r) => r.status !== 'maintenance');
-      if (anyAvailable.length === 0) return null;
-      const room = anyAvailable[0];
-      const equipment: string[] = [];
-      equipment.push('高清庭审直播系统');
-      if (caseType === 'criminal' || priority === 'high') {
-        equipment.push('远程庭审终端');
-      }
-      if (room.equipment.includes('证据展示台')) {
-        equipment.push('证据展示台');
-      }
-      equipment.push('庭审录音录像系统');
-
-      return {
-        courtroom: room,
-        score: 30,
-        reason: '无空闲法庭，推荐占用中法庭（需协调）',
-        equipment,
-        conflictInfo,
-        suitability: buildSuitability(room),
-        matchingDetails: buildMatchingDetails(room, conflictInfo),
-      };
+      roomsToScore = courtrooms.filter((r) => r.status !== 'maintenance');
+    } else {
+      roomsToScore = availableRooms;
     }
 
-    const scored = availableRooms.map((room) => {
+    if (roomsToScore.length === 0) return [];
+
+    const scored = roomsToScore.map((room) => {
+      const conflictInfo = buildConflictInfo(room);
       let score = 0;
       const reasons: string[] = [];
 
@@ -208,6 +213,12 @@ export const useCourtStore = create<CourtState>((set, get) => ({
 
       score += Math.min(room.capacity / 5, 10);
 
+      if (conflictInfo.hasConflict && conflictInfo.type === 'high-high') {
+        score -= 50;
+      } else if (conflictInfo.hasConflict) {
+        score -= 20;
+      }
+
       const equipment: string[] = [];
       equipment.push('高清庭审直播系统');
       if (caseType === 'criminal' || priority === 'high') {
@@ -220,7 +231,7 @@ export const useCourtStore = create<CourtState>((set, get) => ({
 
       return {
         courtroom: room,
-        score,
+        score: Math.max(0, score),
         reason: reasons.length > 0 ? reasons.join('、') : '基础配置',
         equipment,
         conflictInfo,
@@ -230,7 +241,7 @@ export const useCourtStore = create<CourtState>((set, get) => ({
     });
 
     scored.sort((a, b) => b.score - a.score);
-    return scored[0];
+    return scored.slice(0, 3);
   },
 
   assignCourtroom: (caseId, courtroomId) => {
@@ -389,12 +400,14 @@ export const useCourtStore = create<CourtState>((set, get) => ({
     const isHighHigh = get().isHighHighConflict(
       newCase.type,
       newCase.priority,
-      newCase.scheduledTime
+      newCase.scheduledTime,
+      newCase.courtroomId
     );
     const conflict = get().detectConflict(
       newCase.type,
       newCase.priority,
-      newCase.scheduledTime
+      newCase.scheduledTime,
+      newCase.courtroomId
     );
 
     set((state) => ({ cases: [...state.cases, newCase] }));

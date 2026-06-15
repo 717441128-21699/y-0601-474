@@ -129,6 +129,8 @@ export interface EscortMission {
     operatorRole?: UserRole;
     timestamp: string;
     note?: string;
+    disposalNote?: string;
+    contactOfficer?: string;
   }[];
 }
 

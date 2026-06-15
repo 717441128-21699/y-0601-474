@@ -19,7 +19,7 @@ interface DetentionState {
   completeMission: (missionId: string) => void;
   updateMissionProgress: (missionId: string, progress: number) => void;
   triggerAlarm: (missionId: string) => void;
-  startDisposal: (missionId: string) => void;
+  startDisposal: (missionId: string, disposalNote?: string, contactOfficer?: string) => void;
   dismissAlarm: (missionId: string) => void;
   getTotalDetainees: () => number;
   getEscortingCount: () => number;
@@ -155,12 +155,12 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
       missionTimeoutMap.delete(missionId);
     }
 
-    set((s) => ({
-      missions: s.missions.map((m) =>
+    set((s) => {
+      const updatedMissions: EscortMission[] = s.missions.map((m) =>
         m.id === missionId
           ? {
               ...m,
-              status: 'completed',
+              status: 'completed' as const,
               progress: 100,
               disposalRecords: [
                 ...m.disposalRecords,
@@ -174,15 +174,20 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
               ],
             }
           : m
-      ),
-      rooms: s.rooms.map((r) => ({
-        ...r,
-        detainees: r.detainees.map((d) =>
-          d.id === mission.detaineeId ? { ...d, status: 'returned' as const } : d
-        ),
-      })),
-      activeAlarms: s.activeAlarms.filter((id) => id !== missionId),
-    }));
+      );
+      const updatedMission = updatedMissions.find((m) => m.id === missionId)!;
+      return {
+        missions: updatedMissions,
+        rooms: s.rooms.map((r) => ({
+          ...r,
+          detainees: r.detainees.map((d) =>
+            d.id === mission.detaineeId ? { ...d, status: 'returned' as const } : d
+          ),
+        })),
+        activeAlarms: s.activeAlarms.filter((id) => id !== missionId),
+        selectedMission: s.selectedMission?.id === missionId ? updatedMission : s.selectedMission,
+      };
+    });
     savePersist(PERSIST_KEY, {
       rooms: get().rooms,
       missions: get().missions,
@@ -240,16 +245,16 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
     }
   },
 
-  startDisposal: (missionId) => {
+  startDisposal: (missionId, disposalNote, contactOfficer) => {
     const user = useAuthStore.getState().currentUser;
     if (!user) return;
 
-    set((s) => ({
-      missions: s.missions.map((m) =>
+    set((s) => {
+      const updatedMissions: EscortMission[] = s.missions.map((m) =>
         m.id === missionId
           ? {
               ...m,
-              status: 'disposing',
+              status: 'disposing' as const,
               disposalRecords: [
                 ...m.disposalRecords,
                 {
@@ -258,12 +263,19 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
                   operatorRole: user.role,
                   timestamp: new Date().toLocaleString('zh-CN'),
                   note: '已联系法警处置',
+                  disposalNote,
+                  contactOfficer,
                 },
               ],
             }
           : m
-      ),
-    }));
+      );
+      const updatedMission = updatedMissions.find((m) => m.id === missionId)!;
+      return {
+        missions: updatedMissions,
+        selectedMission: s.selectedMission?.id === missionId ? updatedMission : s.selectedMission,
+      };
+    });
     savePersist(PERSIST_KEY, {
       rooms: get().rooms,
       missions: get().missions,

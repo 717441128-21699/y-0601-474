@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   FileStack,
   Plus,
@@ -28,6 +28,7 @@ interface ReviewTimelineItem {
   dossierName: string;
   stage: string;
   reviewer: string;
+  reviewerRole?: string;
   result: 'pass' | 'reject';
   comment: string;
   timestamp: string;
@@ -57,6 +58,24 @@ export const DossierPage: React.FC = () => {
   const [rejectErrorsText, setRejectErrorsText] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [reviewComment, setReviewComment] = useState('');
+  const [highlightDossierId, setHighlightDossierId] = useState<string | null>(null);
+  const [processingAction, setProcessingAction] = useState<string | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (selectedDossier) {
+      setHighlightDossierId(selectedDossier.id);
+      if (detailRef.current) {
+        detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      const timer = setTimeout(() => {
+        setHighlightDossierId(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedDossier]);
 
   const [submitForm, setSubmitForm] = useState({
     caseNumber: '',
@@ -92,6 +111,7 @@ export const DossierPage: React.FC = () => {
           dossierName: d.name,
           stage: h.stage,
           reviewer: h.reviewer,
+          reviewerRole: h.reviewerRole,
           result: h.result,
           comment: h.comment,
           timestamp: h.timestamp,
@@ -148,30 +168,77 @@ export const DossierPage: React.FC = () => {
 
   const handleFormatCheck = () => {
     if (!selectedDossier) return;
-    formatCheck(selectedDossier.id);
+    const canFormatCheck = canPerformAction('format_check');
+    handleActionWithFeedback('formatCheck', () => {
+      formatCheck(selectedDossier.id);
+    }, canFormatCheck);
+  };
+
+  const handleFormatReject = () => {
+    if (!selectedDossier) return;
+    const canFormatCheck = canPerformAction('format_check');
+    handleActionWithFeedback('formatReject', () => {
+      openRejectModal('format');
+    }, canFormatCheck);
   };
 
   const handleInitialReviewPass = () => {
     if (!selectedDossier) return;
-    initialReview(selectedDossier.id, reviewComment || '初审通过', true);
-    setReviewComment('');
+    const canInitialReview = canPerformAction('initial_review');
+    handleActionWithFeedback('initialReviewPass', () => {
+      initialReview(selectedDossier.id, reviewComment || '初审通过', true);
+      setReviewComment('');
+    }, canInitialReview);
+  };
+
+  const handleInitialReviewReject = () => {
+    if (!selectedDossier) return;
+    const canInitialReview = canPerformAction('initial_review');
+    handleActionWithFeedback('initialReviewReject', () => {
+      openRejectModal('initial');
+    }, canInitialReview);
   };
 
   const handleChiefReviewPass = () => {
     if (!selectedDossier) return;
-    chiefReview(selectedDossier.id, reviewComment || '庭长审批通过', true);
-    setReviewComment('');
+    const canChiefReview = canPerformAction('chief_review');
+    handleActionWithFeedback('chiefReviewPass', () => {
+      chiefReview(selectedDossier.id, reviewComment || '庭长审批通过', true);
+      setReviewComment('');
+    }, canChiefReview);
+  };
+
+  const handleChiefReviewReject = () => {
+    if (!selectedDossier) return;
+    const canChiefReview = canPerformAction('chief_review');
+    handleActionWithFeedback('chiefReviewReject', () => {
+      openRejectModal('chief');
+    }, canChiefReview);
   };
 
   const handlePresidentReviewPass = () => {
     if (!selectedDossier) return;
-    presidentReview(selectedDossier.id, reviewComment || '院长审批通过', true);
-    setReviewComment('');
+    const canPresidentReview = canPerformAction('president_review');
+    handleActionWithFeedback('presidentReviewPass', () => {
+      presidentReview(selectedDossier.id, reviewComment || '院长审批通过', true);
+      setReviewComment('');
+    }, canPresidentReview);
+  };
+
+  const handlePresidentReviewReject = () => {
+    if (!selectedDossier) return;
+    const canPresidentReview = canPerformAction('president_review');
+    handleActionWithFeedback('presidentReviewReject', () => {
+      openRejectModal('president');
+    }, canPresidentReview);
   };
 
   const handleResubmit = () => {
     if (!selectedDossier) return;
-    resubmitDossier(selectedDossier.id);
+    const canResubmit = canPerformAction('submit');
+    handleActionWithFeedback('resubmit', () => {
+      resubmitDossier(selectedDossier.id);
+    }, canResubmit);
   };
 
   const handleSubmitDossier = (e?: React.FormEvent) => {
@@ -262,31 +329,160 @@ export const DossierPage: React.FC = () => {
     return null;
   };
 
+  const getStageInfo = (dossier: Dossier) => {
+    const status = dossier.status;
+    const history = [...dossier.reviewHistory].reverse();
+
+    const findLastByStage = (stageName: string) => {
+      return history.find((h) => h.stage === stageName);
+    };
+
+    const lastRecord = dossier.reviewHistory[dossier.reviewHistory.length - 1];
+    const lastComment = lastRecord?.comment;
+
+    let currentHandler = '';
+    let handlerColor = 'text-slate-300';
+    let statusDescription = '';
+    let showRejectInfo = false;
+    let rejectStage = '';
+    let rejectPerson = '';
+    let rejectReason = '';
+
+    if (status === 'submitted' || status === 'format_checking') {
+      currentHandler = '待书记员格式校验';
+      handlerColor = 'text-court-orange';
+      statusDescription = '案卷已提交，等待书记员进行格式校验';
+    } else if (status === 'initial_review') {
+      const judgeRecord = findLastByStage('法官初审');
+      currentHandler = judgeRecord ? `法官 ${judgeRecord.reviewer}` : '待法官初审';
+      handlerColor = 'text-court-blue';
+      statusDescription = '格式校验通过，等待法官进行初审';
+    } else if (status === 'chief_review') {
+      const initialRecord = findLastByStage('法官初审');
+      const judgeName = initialRecord?.reviewer || '法官';
+      currentHandler = `待庭长审批（初审法官：${judgeName}）`;
+      handlerColor = 'text-court-purple';
+      statusDescription = '法官初审通过，等待庭长进行审批';
+    } else if (status === 'president_review') {
+      const chiefRecord = findLastByStage('庭长审批');
+      const chiefName = chiefRecord?.reviewer || '庭长';
+      currentHandler = `待院长审批（庭长：${chiefName}）`;
+      handlerColor = 'text-court-gold';
+      statusDescription = '庭长审批通过，等待院长进行最终审批';
+    } else if (status === 'approved' || status === 'archived') {
+      const lastHandler = lastRecord?.reviewer || '审批人';
+      currentHandler = `全部审批完成（最终处理人：${lastHandler}）`;
+      handlerColor = 'text-court-green';
+      statusDescription = '所有审批环节已完成，案卷已通过';
+    } else if (status.includes('rejected')) {
+      showRejectInfo = true;
+      if (status === 'format_rejected') {
+        rejectStage = '格式校验';
+      } else if (status === 'initial_rejected') {
+        rejectStage = '法官初审';
+      } else if (status === 'chief_rejected') {
+        rejectStage = '庭长审批';
+      } else if (status === 'president_rejected') {
+        rejectStage = '院长审批';
+      }
+      const rejectRecord = findLastByStage(rejectStage);
+      rejectPerson = rejectRecord?.reviewer || '处理人';
+      rejectReason = rejectRecord?.comment || dossier.rejectReason || '未填写退回原因';
+      currentHandler = `已被${rejectStage}退回`;
+      handlerColor = 'text-court-red';
+      statusDescription = `案卷在${rejectStage}环节被退回，需要修改后重新提交`;
+    }
+
+    return {
+      currentHandler,
+      handlerColor,
+      statusDescription,
+      showRejectInfo,
+      rejectStage,
+      rejectPerson,
+      rejectReason,
+      lastComment,
+    };
+  };
+
+  const getRoleBadge = (role?: string) => {
+    const roleMap: Record<string, { label: string; bg: string; text: string }> = {
+      clerk: { label: '书记员', bg: 'bg-court-orange/20', text: 'text-court-orange' },
+      judge: { label: '法官', bg: 'bg-court-blue/20', text: 'text-court-blue' },
+      chief: { label: '庭长', bg: 'bg-court-purple/20', text: 'text-court-purple' },
+      president: { label: '院长', bg: 'bg-court-gold/20', text: 'text-court-gold' },
+    };
+    const info = roleMap[role || ''] || { label: '未知', bg: 'bg-slate-500/20', text: 'text-slate-400' };
+    return (
+      <span className={`text-[10px] px-1.5 py-0.5 rounded ${info.bg} ${info.text} font-medium`}>
+        {info.label}
+      </span>
+    );
+  };
+
+  const handleActionWithFeedback = async (actionKey: string, action: () => void, canPerform: boolean) => {
+    if (!canPerform) {
+      setPermissionError('无权限操作');
+      setTimeout(() => setPermissionError(null), 2000);
+      return;
+    }
+    setProcessingAction(actionKey);
+    setPermissionError(null);
+    setTimeout(() => {
+      action();
+      setProcessingAction(null);
+    }, 500);
+  };
+
   const renderApprovalButtons = () => {
     if (!selectedDossier) return null;
     const s = selectedDossier.status;
 
     if (s === 'submitted' || s === 'format_checking') {
       const canFormatCheck = canPerformAction('format_check');
+      const isProcessing = processingAction === 'formatCheck' || processingAction === 'formatReject';
       return (
         <div className="space-y-2">
+          {permissionError && (
+            <p className="text-xs text-court-red text-right font-medium">{permissionError}</p>
+          )}
           <div className="flex gap-3 justify-end">
             <button
-              onClick={() => canFormatCheck && openRejectModal('format')}
-              className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canFormatCheck ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={handleFormatReject}
+              className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canFormatCheck || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isProcessing}
             >
-              <XCircle size={16} />
-              格式校验退回
+              {processingAction === 'formatReject' ? (
+                <>
+                  <RotateCw size={16} className="animate-spin" />
+                  处理中...
+                </>
+              ) : (
+                <>
+                  <XCircle size={16} />
+                  格式校验退回
+                </>
+              )}
             </button>
             <button
-              onClick={() => canFormatCheck && handleFormatCheck()}
-              className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canFormatCheck ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={handleFormatCheck}
+              className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canFormatCheck || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isProcessing}
             >
-              <CheckCircle size={16} />
-              格式校验通过
+              {processingAction === 'formatCheck' ? (
+                <>
+                  <RotateCw size={16} className="animate-spin" />
+                  处理中...
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={16} />
+                  格式校验通过
+                </>
+              )}
             </button>
           </div>
-          {!canFormatCheck && (
+          {!canFormatCheck && !permissionError && (
             <p className="text-xs text-slate-500 text-right">书记员操作</p>
           )}
         </div>
@@ -295,34 +491,58 @@ export const DossierPage: React.FC = () => {
 
     if (s === 'initial_review') {
       const canInitialReview = canPerformAction('initial_review');
+      const isProcessing = processingAction === 'initialReviewPass' || processingAction === 'initialReviewReject';
       return (
         <div className="space-y-3">
+          {permissionError && (
+            <p className="text-xs text-court-red text-right font-medium">{permissionError}</p>
+          )}
           <input
             type="text"
             placeholder="填写初审意见（可选）..."
             value={reviewComment}
             onChange={(e) => setReviewComment(e.target.value)}
             className={`input-field text-sm w-full ${!canInitialReview ? 'opacity-50' : ''}`}
-            disabled={!canInitialReview}
+            disabled={!canInitialReview || isProcessing}
           />
           <div className="space-y-2">
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => canInitialReview && openRejectModal('initial')}
-                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canInitialReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={handleInitialReviewReject}
+                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canInitialReview || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
               >
-                <XCircle size={16} />
-                初审退回
+                {processingAction === 'initialReviewReject' ? (
+                  <>
+                    <RotateCw size={16} className="animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={16} />
+                    初审退回
+                  </>
+                )}
               </button>
               <button
-                onClick={() => canInitialReview && handleInitialReviewPass()}
-                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canInitialReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={handleInitialReviewPass}
+                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canInitialReview || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
               >
-                <CheckCircle size={16} />
-                初审通过
+                {processingAction === 'initialReviewPass' ? (
+                  <>
+                    <RotateCw size={16} className="animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={16} />
+                    初审通过
+                  </>
+                )}
               </button>
             </div>
-            {!canInitialReview && (
+            {!canInitialReview && !permissionError && (
               <p className="text-xs text-slate-500 text-right">法官操作</p>
             )}
           </div>
@@ -332,34 +552,58 @@ export const DossierPage: React.FC = () => {
 
     if (s === 'chief_review') {
       const canChiefReview = canPerformAction('chief_review');
+      const isProcessing = processingAction === 'chiefReviewPass' || processingAction === 'chiefReviewReject';
       return (
         <div className="space-y-3">
+          {permissionError && (
+            <p className="text-xs text-court-red text-right font-medium">{permissionError}</p>
+          )}
           <input
             type="text"
             placeholder="填写庭长审批意见（可选）..."
             value={reviewComment}
             onChange={(e) => setReviewComment(e.target.value)}
             className={`input-field text-sm w-full ${!canChiefReview ? 'opacity-50' : ''}`}
-            disabled={!canChiefReview}
+            disabled={!canChiefReview || isProcessing}
           />
           <div className="space-y-2">
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => canChiefReview && openRejectModal('chief')}
-                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canChiefReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={handleChiefReviewReject}
+                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canChiefReview || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
               >
-                <XCircle size={16} />
-                庭长退回
+                {processingAction === 'chiefReviewReject' ? (
+                  <>
+                    <RotateCw size={16} className="animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={16} />
+                    庭长退回
+                  </>
+                )}
               </button>
               <button
-                onClick={() => canChiefReview && handleChiefReviewPass()}
-                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canChiefReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={handleChiefReviewPass}
+                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canChiefReview || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
               >
-                <CheckCircle size={16} />
-                庭长批准
+                {processingAction === 'chiefReviewPass' ? (
+                  <>
+                    <RotateCw size={16} className="animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={16} />
+                    庭长批准
+                  </>
+                )}
               </button>
             </div>
-            {!canChiefReview && (
+            {!canChiefReview && !permissionError && (
               <p className="text-xs text-slate-500 text-right">庭长操作</p>
             )}
           </div>
@@ -369,34 +613,58 @@ export const DossierPage: React.FC = () => {
 
     if (s === 'president_review') {
       const canPresidentReview = canPerformAction('president_review');
+      const isProcessing = processingAction === 'presidentReviewPass' || processingAction === 'presidentReviewReject';
       return (
         <div className="space-y-3">
+          {permissionError && (
+            <p className="text-xs text-court-red text-right font-medium">{permissionError}</p>
+          )}
           <input
             type="text"
             placeholder="填写院长审批意见（可选）..."
             value={reviewComment}
             onChange={(e) => setReviewComment(e.target.value)}
             className={`input-field text-sm w-full ${!canPresidentReview ? 'opacity-50' : ''}`}
-            disabled={!canPresidentReview}
+            disabled={!canPresidentReview || isProcessing}
           />
           <div className="space-y-2">
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => canPresidentReview && openRejectModal('president')}
-                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canPresidentReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={handlePresidentReviewReject}
+                className={`btn-danger text-sm py-2 px-5 flex items-center gap-2 ${!canPresidentReview || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
               >
-                <XCircle size={16} />
-                院长退回
+                {processingAction === 'presidentReviewReject' ? (
+                  <>
+                    <RotateCw size={16} className="animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={16} />
+                    院长退回
+                  </>
+                )}
               </button>
               <button
-                onClick={() => canPresidentReview && handlePresidentReviewPass()}
-                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canPresidentReview ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={handlePresidentReviewPass}
+                className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canPresidentReview || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isProcessing}
               >
-                <CheckCircle size={16} />
-                院长批准
+                {processingAction === 'presidentReviewPass' ? (
+                  <>
+                    <RotateCw size={16} className="animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={16} />
+                    院长批准
+                  </>
+                )}
               </button>
             </div>
-            {!canPresidentReview && (
+            {!canPresidentReview && !permissionError && (
               <p className="text-xs text-slate-500 text-right">院长操作</p>
             )}
           </div>
@@ -406,18 +674,32 @@ export const DossierPage: React.FC = () => {
 
     if (s.includes('rejected')) {
       const canResubmit = canPerformAction('submit');
+      const isProcessing = processingAction === 'resubmit';
       return (
         <div className="space-y-2">
+          {permissionError && (
+            <p className="text-xs text-court-red text-right font-medium">{permissionError}</p>
+          )}
           <div className="flex justify-end">
             <button
-              onClick={() => canResubmit && handleResubmit()}
-              className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canResubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={handleResubmit}
+              className={`btn-primary text-sm py-2 px-5 flex items-center gap-2 ${!canResubmit || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isProcessing}
             >
-              <RotateCw size={16} />
-              重新提交
+              {isProcessing ? (
+                <>
+                  <RotateCw size={16} className="animate-spin" />
+                  处理中...
+                </>
+              ) : (
+                <>
+                  <RotateCw size={16} />
+                  重新提交
+                </>
+              )}
             </button>
           </div>
-          {!canResubmit && (
+          {!canResubmit && !permissionError && (
             <p className="text-xs text-slate-500 text-right">书记员操作</p>
           )}
         </div>
@@ -437,6 +719,18 @@ export const DossierPage: React.FC = () => {
         @keyframes pulseGlow {
           0%, 100% { box-shadow: 0 0 10px rgba(201,168,108,0.3); }
           50% { box-shadow: 0 0 25px rgba(201,168,108,0.6); }
+        }
+        @keyframes goldHighlight {
+          0% { box-shadow: 0 0 0 rgba(201,168,108,0), border-color: rgba(201,168,108,0); }
+          20% { box-shadow: 0 0 30px rgba(201,168,108,0.8), 0 0 60px rgba(201,168,108,0.4); border-color: rgba(201,168,108,0.8); }
+          40% { box-shadow: 0 0 20px rgba(201,168,108,0.6), 0 0 40px rgba(201,168,108,0.3); border-color: rgba(201,168,108,0.6); }
+          60% { box-shadow: 0 0 30px rgba(201,168,108,0.8), 0 0 60px rgba(201,168,108,0.4); border-color: rgba(201,168,108,0.8); }
+          80% { box-shadow: 0 0 20px rgba(201,168,108,0.6), 0 0 40px rgba(201,168,108,0.3); border-color: rgba(201,168,108,0.6); }
+          100% { box-shadow: 0 0 0 rgba(201,168,108,0), border-color: rgba(201,168,108,0); }
+        }
+        .dossier-highlight {
+          animation: goldHighlight 3s ease-out forwards;
+          border: 2px solid rgba(201,168,108,0.8);
         }
       `}</style>
 
@@ -574,7 +868,11 @@ export const DossierPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 38%' }}>
+          <div
+            ref={detailRef}
+            className={`glass-panel overflow-hidden flex flex-col min-h-0 transition-all duration-300 ${highlightDossierId && selectedDossier?.id === highlightDossierId ? 'dossier-highlight' : ''}`}
+            style={{ flex: '0 0 38%' }}
+          >
             <div className="section-title px-6 pt-5">
               <FileText size={18} />
               案卷详情
@@ -649,6 +947,55 @@ export const DossierPage: React.FC = () => {
                       </div>
                     )}
                   </div>
+
+                  <div className="px-4 py-3 rounded-lg bg-court-card/50 border border-court-border">
+                    <p className="text-xs text-slate-500 mb-2 flex items-center gap-1.5">
+                      <ListChecks size={12} />
+                      当前阶段
+                    </p>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <StatusBadge type="dossier" status={selectedDossier.status} />
+                        <span className="text-xs text-slate-400">
+                          {getStageInfo(selectedDossier).statusDescription}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <User size={12} className="text-slate-500" />
+                        <span className={`text-sm font-medium ${getStageInfo(selectedDossier).handlerColor}`}>
+                          {getStageInfo(selectedDossier).currentHandler}
+                        </span>
+                      </div>
+                      {getStageInfo(selectedDossier).showRejectInfo && (
+                        <div className="flex items-start gap-2 text-xs">
+                          <AlertCircle size={12} className="text-court-red mt-0.5 flex-shrink-0" />
+                          <span className="text-slate-300">
+                            <span className="text-court-red font-medium">
+                              {getStageInfo(selectedDossier).rejectStage}
+                            </span>
+                            {' · '}
+                            <span className="text-slate-400">退回人：</span>
+                            {getStageInfo(selectedDossier).rejectPerson}
+                            {' · '}
+                            <span className="text-slate-400">原因：</span>
+                            {getStageInfo(selectedDossier).rejectReason}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {getStageInfo(selectedDossier).lastComment && (
+                    <div className="px-4 py-3 rounded-lg bg-court-green/5 border border-court-green/20">
+                      <p className="text-xs text-slate-500 mb-1 flex items-center gap-1.5">
+                        <FileText size={12} />
+                        最近处理意见
+                      </p>
+                      <p className="text-sm text-slate-300 italic">
+                        "{getStageInfo(selectedDossier).lastComment}"
+                      </p>
+                    </div>
+                  )}
 
                   <div>
                     <p className="text-xs text-slate-500 mb-2 flex items-center gap-1.5">
@@ -778,8 +1125,8 @@ export const DossierPage: React.FC = () => {
                           <div
                             className={`absolute left-0 top-1.5 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
                               item.result === 'pass'
-                                ? 'bg-court-green/10 border-court-green/40 text-court-green'
-                                : 'bg-court-red/10 border-court-red/40 text-court-red'
+                                ? 'bg-court-green/10 border-court-green text-court-green'
+                                : 'bg-court-red/10 border-court-red text-court-red'
                             }`}
                           >
                             {item.result === 'pass' ? (
@@ -788,7 +1135,13 @@ export const DossierPage: React.FC = () => {
                               <XCircle size={12} />
                             )}
                           </div>
-                          <div className="glass-panel px-3 py-2.5 rounded-lg border border-court-border/60">
+                          <div
+                            className={`glass-panel px-3 py-2.5 rounded-lg border-2 ${
+                              item.result === 'pass'
+                                ? 'border-court-green/40'
+                                : 'border-court-red/40'
+                            }`}
+                          >
                             <div className="flex items-center justify-between mb-1">
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-[11px] text-court-gold">
@@ -804,6 +1157,7 @@ export const DossierPage: React.FC = () => {
                                 >
                                   {item.stage} · {item.result === 'pass' ? '通过' : '退回'}
                                 </span>
+                                {getRoleBadge(item.reviewerRole)}
                               </div>
                               <span className="text-[10px] text-slate-500 font-mono whitespace-nowrap">
                                 {item.timestamp}
@@ -816,9 +1170,9 @@ export const DossierPage: React.FC = () => {
                                 {item.reviewer}
                               </span>
                               {item.comment && (
-                                <span className="flex items-center gap-1 truncate">
+                                <span className="flex items-center gap-1 truncate italic text-slate-400">
                                   <FileText size={10} />
-                                  {item.comment}
+                                  "{item.comment}"
                                 </span>
                               )}
                             </div>
@@ -843,8 +1197,8 @@ export const DossierPage: React.FC = () => {
                           <div
                             className={`absolute left-0 top-1.5 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
                               item.result === 'pass'
-                                ? 'bg-court-green/10 border-court-green/40 text-court-green'
-                                : 'bg-court-red/10 border-court-red/40 text-court-red'
+                                ? 'bg-court-green/10 border-court-green text-court-green'
+                                : 'bg-court-red/10 border-court-red text-court-red'
                             }`}
                           >
                             {item.result === 'pass' ? (
@@ -853,7 +1207,13 @@ export const DossierPage: React.FC = () => {
                               <XCircle size={12} />
                             )}
                           </div>
-                          <div className="glass-panel px-3 py-2.5 rounded-lg border border-court-border/60">
+                          <div
+                            className={`glass-panel px-3 py-2.5 rounded-lg border-2 ${
+                              item.result === 'pass'
+                                ? 'border-court-green/40'
+                                : 'border-court-red/40'
+                            }`}
+                          >
                             <div className="flex items-center justify-between mb-1">
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-[11px] text-court-gold">
@@ -869,6 +1229,7 @@ export const DossierPage: React.FC = () => {
                                 >
                                   {item.stage} · {item.result === 'pass' ? '通过' : '退回'}
                                 </span>
+                                {getRoleBadge(item.reviewerRole)}
                               </div>
                               <span className="text-[10px] text-slate-500 font-mono whitespace-nowrap">
                                 {item.timestamp}
@@ -881,9 +1242,9 @@ export const DossierPage: React.FC = () => {
                                 {item.reviewer}
                               </span>
                               {item.comment && (
-                                <span className="flex items-center gap-1 truncate">
+                                <span className="flex items-center gap-1 truncate italic text-slate-400">
                                   <FileText size={10} />
-                                  {item.comment}
+                                  "{item.comment}"
                                 </span>
                               )}
                             </div>

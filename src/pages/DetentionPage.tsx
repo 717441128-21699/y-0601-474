@@ -32,9 +32,15 @@ import type { DetentionRoom, Detainee, EscortMission } from '../types';
 
 const DISPOSAL_ICON_CONFIG: Record<string, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
   trigger_alarm: { icon: Clock, color: 'text-court-red', bgColor: 'bg-court-red/15 border-court-red/40', label: '系统触发超时警报' },
-  start_disposal: { icon: Shield, color: 'text-court-orange', bgColor: 'bg-court-orange/15 border-court-orange/40', label: '开始处置 - 联系法警' },
+  start_disposal: { icon: Shield, color: 'text-court-orange', bgColor: 'bg-court-orange/15 border-court-orange/40', label: '开始处置' },
   complete_return: { icon: CheckCircle, color: 'text-court-green', bgColor: 'bg-court-green/15 border-court-green/40', label: '人员已安全归位' },
 };
+
+interface DisposalForm {
+  missionId: string;
+  disposalNote: string;
+  contactOfficer: string;
+}
 
 const ROOM_STATUS_CONFIG: Record<string, { label: string; bgColor: string; borderColor: string; textColor: string }> = {
   full: { label: '满员', bgColor: 'bg-court-red/15', borderColor: 'border-court-red/40', textColor: 'text-court-red' },
@@ -113,10 +119,16 @@ export const DetentionPage: React.FC = () => {
 
   const [showRoomDetail, setShowRoomDetail] = useState(false);
   const [showStartEscortModal, setShowStartEscortModal] = useState(false);
+  const [showDisposalModal, setShowDisposalModal] = useState(false);
   const [escortForm, setEscortForm] = useState<StartEscortForm>({
     roomId: '',
     detaineeId: '',
     courtroomId: courtrooms.find((c) => c.status !== 'maintenance')?.id || '',
+  });
+  const [disposalForm, setDisposalForm] = useState<DisposalForm>({
+    missionId: '',
+    disposalNote: '',
+    contactOfficer: '',
   });
 
   useEffect(() => {
@@ -133,6 +145,10 @@ export const DetentionPage: React.FC = () => {
   );
   const overdueCount = useMemo(
     () => missions.filter((m) => m.status === 'overdue').length,
+    [missions]
+  );
+  const completedCount = useMemo(
+    () => missions.filter((m) => m.status === 'completed').length,
     [missions]
   );
 
@@ -185,6 +201,30 @@ export const DetentionPage: React.FC = () => {
       m.id === mission.id ? { ...m, status: 'in_progress' as const } : m
     );
     useDetentionStore.setState({ missions: updatedMissions });
+  };
+
+  const handleOpenDisposalModal = (missionId: string) => {
+    setDisposalForm({
+      missionId,
+      disposalNote: '',
+      contactOfficer: '',
+    });
+    setShowDisposalModal(true);
+  };
+
+  const handleConfirmDisposal = () => {
+    if (!disposalForm.disposalNote.trim()) return;
+    startDisposal(
+      disposalForm.missionId,
+      disposalForm.disposalNote.trim(),
+      disposalForm.contactOfficer.trim() || undefined
+    );
+    setShowDisposalModal(false);
+    setDisposalForm({
+      missionId: '',
+      disposalNote: '',
+      contactOfficer: '',
+    });
   };
 
   return (
@@ -252,7 +292,7 @@ export const DetentionPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-5 gap-4">
             <DataCard
               title="总任务数"
               value={totalMissions}
@@ -272,10 +312,16 @@ export const DetentionPage: React.FC = () => {
               color="orange"
             />
             <DataCard
-              title="超期数量"
+              title="超期未归"
               value={overdueCount}
               icon={AlertOctagon}
               color="red"
+            />
+            <DataCard
+              title="已完成"
+              value={completedCount}
+              icon={CheckCircle}
+              color="green"
             />
           </div>
         </div>
@@ -594,7 +640,7 @@ export const DetentionPage: React.FC = () => {
                         {mission.status === 'overdue' && (
                           <>
                             <button
-                              onClick={(e) => { e.stopPropagation(); startDisposal(mission.id); }}
+                              onClick={(e) => { e.stopPropagation(); handleOpenDisposalModal(mission.id); }}
                               className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-orange/15 text-court-orange border border-court-orange/40 hover:bg-court-orange/25 transition-all"
                             >
                               <Shield size={10} />
@@ -735,7 +781,7 @@ export const DetentionPage: React.FC = () => {
                     {selectedMission.status === 'overdue' && (
                       <>
                         <button
-                          onClick={() => startDisposal(selectedMission.id)}
+                          onClick={() => handleOpenDisposalModal(selectedMission.id)}
                           className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-gradient-to-r from-court-orange to-court-orange/80 text-white border border-court-orange/50 hover:from-court-orange/90 hover:to-court-orange/70 transition-all shadow-lg shadow-court-orange/20"
                         >
                           <Shield size={13} />
@@ -830,6 +876,19 @@ export const DetentionPage: React.FC = () => {
                                     <p className="text-[10px] text-slate-500 mt-1 italic">
                                       {record.note}
                                     </p>
+                                  )}
+                                  {record.disposalNote && (
+                                    <p className="text-[10px] text-slate-400 mt-1">
+                                      <span className="text-court-orange font-medium">处置说明：</span>
+                                      {record.disposalNote}
+                                    </p>
+                                  )}
+                                  {record.contactOfficer && (
+                                    <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-1">
+                                      <Phone size={9} className="text-court-orange" />
+                                      <span className="text-court-orange font-medium">法警联系人：</span>
+                                      <span>{record.contactOfficer}</span>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -1139,6 +1198,108 @@ export const DetentionPage: React.FC = () => {
               >
                 <Check size={16} />
                 确认发起
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDisposalModal && (
+        <div
+          className="fixed inset-0 bg-court-bg/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+          onClick={() => setShowDisposalModal(false)}
+        >
+          <div
+            className="glass-panel w-full max-w-md max-h-[90vh] overflow-hidden animate-[slideInUp_0.3s_ease-out]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-court-border flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-court-orange to-court-orange/70 flex items-center justify-center">
+                  <Shield className="text-white" size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-serif font-bold text-court-goldLight">
+                    开始处置警报
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    请填写处置信息并联系法警
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDisposalModal(false)}
+                className="w-8 h-8 rounded-lg hover:bg-court-card flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto max-h-[calc(90vh-200px)]">
+              <div>
+                <label className="block text-sm text-slate-300 mb-2 flex items-center gap-2">
+                  <AlertCircle size={12} className="text-court-orange" />
+                  处置说明 <span className="text-court-red">*</span>
+                </label>
+                <textarea
+                  value={disposalForm.disposalNote}
+                  onChange={(e) =>
+                    setDisposalForm((prev) => ({ ...prev, disposalNote: e.target.value }))
+                  }
+                  placeholder="请填写处置说明，如：已联系法警张队前往..."
+                  rows={4}
+                  className="input-field resize-none"
+                />
+                {!disposalForm.disposalNote.trim() && (
+                  <p className="text-[10px] text-court-red mt-1">请填写处置说明</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-300 mb-2 flex items-center gap-2">
+                  <Phone size={12} className="text-court-orange" />
+                  法警联系人
+                </label>
+                <input
+                  type="text"
+                  value={disposalForm.contactOfficer}
+                  onChange={(e) =>
+                    setDisposalForm((prev) => ({ ...prev, contactOfficer: e.target.value }))
+                  }
+                  placeholder="请输入法警姓名或联系方式"
+                  className="input-field"
+                />
+              </div>
+
+              {currentUser && (
+                <div className="p-3 rounded-lg bg-court-bg/50 border border-court-border/50">
+                  <p className="text-[10px] text-slate-500">
+                    操作人: <span className="text-slate-300">{currentUser.name}</span>
+                    <span className="mx-2">|</span>
+                    角色: <span className="text-slate-300">
+                      {currentUser.role === 'clerk' ? '书记员' :
+                       currentUser.role === 'judge' ? '法官' :
+                       currentUser.role === 'chief' ? '庭长' : '院长'}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-court-border flex gap-3">
+              <button
+                onClick={() => setShowDisposalModal(false)}
+                className="btn-secondary flex-1"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmDisposal}
+                disabled={!disposalForm.disposalNote.trim()}
+                className="btn-primary flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-court-orange to-court-orange/80 border-court-orange/50 hover:from-court-orange/90 hover:to-court-orange/70 shadow-lg shadow-court-orange/20"
+              >
+                <Shield size={16} />
+                确认开始处置
               </button>
             </div>
           </div>
