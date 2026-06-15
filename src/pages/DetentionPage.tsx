@@ -20,6 +20,7 @@ import {
   AlertCircle,
   Shield,
   ArrowRight,
+  CheckCircle,
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { DataCard } from '../components/DataCard';
@@ -28,6 +29,12 @@ import { useCourtStore } from '../store/useCourtStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { CourtScene3D } from '../components/three/CourtScene3D';
 import type { DetentionRoom, Detainee, EscortMission } from '../types';
+
+const DISPOSAL_ICON_CONFIG: Record<string, { icon: React.ElementType; color: string; bgColor: string; label: string }> = {
+  trigger_alarm: { icon: Clock, color: 'text-court-red', bgColor: 'bg-court-red/15 border-court-red/40', label: '系统触发超时警报' },
+  start_disposal: { icon: Shield, color: 'text-court-orange', bgColor: 'bg-court-orange/15 border-court-orange/40', label: '开始处置 - 联系法警' },
+  complete_return: { icon: CheckCircle, color: 'text-court-green', bgColor: 'bg-court-green/15 border-court-green/40', label: '人员已安全归位' },
+};
 
 const ROOM_STATUS_CONFIG: Record<string, { label: string; bgColor: string; borderColor: string; textColor: string }> = {
   full: { label: '满员', bgColor: 'bg-court-red/15', borderColor: 'border-court-red/40', textColor: 'text-court-red' },
@@ -86,14 +93,6 @@ interface StartEscortForm {
   courtroomId: string;
 }
 
-interface AlarmActionState {
-  [missionId: string]: {
-    contacted: boolean;
-    forced: boolean;
-    reported: boolean;
-  };
-}
-
 export const DetentionPage: React.FC = () => {
   const {
     rooms,
@@ -105,9 +104,7 @@ export const DetentionPage: React.FC = () => {
     setSelectedMission,
     startEscort,
     completeMission,
-    dismissAlarm,
-    triggerAlarm,
-    getTotalDetainees,
+    startDisposal,
     getEscortingCount,
   } = useDetentionStore();
 
@@ -121,7 +118,6 @@ export const DetentionPage: React.FC = () => {
     detaineeId: '',
     courtroomId: courtrooms.find((c) => c.status !== 'maintenance')?.id || '',
   });
-  const [alarmActions, setAlarmActions] = useState<AlarmActionState>({});
 
   useEffect(() => {
     if (selectedRoom) {
@@ -129,26 +125,26 @@ export const DetentionPage: React.FC = () => {
     }
   }, [selectedRoom]);
 
-  const totalDetainees = useMemo(() => getTotalDetainees(), [getTotalDetainees]);
+  const totalMissions = useMemo(() => missions.length, [missions]);
   const escortingCount = useMemo(() => getEscortingCount(), [getEscortingCount]);
+  const disposingCount = useMemo(
+    () => missions.filter((m) => m.status === 'disposing').length,
+    [missions]
+  );
   const overdueCount = useMemo(
     () => missions.filter((m) => m.status === 'overdue').length,
     [missions]
-  );
-  const emptyRoomCount = useMemo(
-    () => rooms.filter((r) => r.status === 'empty').length,
-    [rooms]
   );
 
   const escortPaths = useMemo(
     () =>
       missions
-        .filter((m) => m.status === 'in_progress' || m.status === 'overdue')
+        .filter((m) => m.status === 'in_progress' || m.status === 'overdue' || m.status === 'disposing')
         .map((m) => ({
           missionId: m.id,
           points: m.pathPoints,
           progress: m.progress,
-          alarm: m.status === 'overdue',
+          alarm: m.status === 'overdue' || m.status === 'disposing',
         })),
     [missions]
   );
@@ -156,7 +152,7 @@ export const DetentionPage: React.FC = () => {
   const activeAlarmsData = useMemo(() => {
     return activeAlarms
       .map((id) => missions.find((m) => m.id === id))
-      .filter((m): m is EscortMission => !!m && m.status === 'overdue');
+      .filter((m): m is EscortMission => !!m && (m.status === 'overdue' || m.status === 'disposing'));
   }, [activeAlarms, missions]);
 
   const selectedRoomDetainees = useMemo(() => {
@@ -189,40 +185,6 @@ export const DetentionPage: React.FC = () => {
       m.id === mission.id ? { ...m, status: 'in_progress' as const } : m
     );
     useDetentionStore.setState({ missions: updatedMissions });
-  };
-
-  const handleAlarmContact = (missionId: string) => {
-    setAlarmActions((prev) => ({
-      ...prev,
-      [missionId]: { ...(prev[missionId] || { contacted: false, forced: false, reported: false }), contacted: true },
-    }));
-  };
-
-  const handleAlarmForce = (missionId: string) => {
-    setAlarmActions((prev) => ({
-      ...prev,
-      [missionId]: { ...(prev[missionId] || { contacted: false, forced: false, reported: false }), forced: true },
-    }));
-    const mission = missions.find((m) => m.id === missionId);
-    if (mission) {
-      completeMission(missionId);
-    }
-  };
-
-  const handleAlarmSend = (missionId: string) => {
-    setAlarmActions((prev) => ({
-      ...prev,
-      [missionId]: { ...(prev[missionId] || { contacted: false, forced: false, reported: false }), reported: true },
-    }));
-    const allActions = alarmActions[missionId] || { contacted: false, forced: false, reported: false };
-    if (allActions.contacted && allActions.forced) {
-      dismissAlarm(missionId);
-    }
-  };
-
-  const isAlarmFullyHandled = (missionId: string): boolean => {
-    const actions = alarmActions[missionId];
-    return !!(actions && actions.contacted && actions.forced && actions.reported);
   };
 
   return (
@@ -292,28 +254,28 @@ export const DetentionPage: React.FC = () => {
 
           <div className="grid grid-cols-4 gap-4">
             <DataCard
-              title="总羁押人数"
-              value={totalDetainees}
-              icon={Users}
+              title="总任务数"
+              value={totalMissions}
+              icon={MapPinHouse}
               color="gold"
             />
             <DataCard
-              title="进行中押解"
+              title="押解中"
               value={escortingCount}
-              icon={MapPinHouse}
+              icon={Users}
               color="blue"
             />
             <DataCard
-              title="超期警报数"
+              title="处置中"
+              value={disposingCount}
+              icon={Shield}
+              color="orange"
+            />
+            <DataCard
+              title="超期数量"
               value={overdueCount}
               icon={AlertOctagon}
               color="red"
-            />
-            <DataCard
-              title="空房间数"
-              value={emptyRoomCount}
-              icon={UserX}
-              color="green"
             />
           </div>
         </div>
@@ -399,249 +361,190 @@ export const DetentionPage: React.FC = () => {
           />
         </div>
 
-        <div className="flex flex-col gap-4 overflow-hidden min-h-0">
-          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 38%' }}>
-            <div className="section-title px-5 pt-4">
-              <Shield size={16} />
-              羁押室状态
-              <span className="ml-auto text-xs font-sans text-slate-400">
-                共 {rooms.length} 间
-              </span>
-            </div>
-            <div className="flex-1 overflow-auto px-5 pb-4">
-              <div className="grid grid-cols-2 gap-3">
-                {rooms.map((room) => {
-                  const statusKey = getRoomStatus(room);
-                  const statusCfg = ROOM_STATUS_CONFIG[statusKey];
-                  const occupancyPercent = room.capacity > 0 ? (room.currentCount / room.capacity) * 100 : 0;
-                  return (
-                    <div
-                      key={room.id}
-                      className={`relative border rounded-xl p-3 cursor-pointer transition-all duration-300 hover:scale-[1.02] ${statusCfg.bgColor} ${statusCfg.borderColor} ${
-                        selectedRoom?.id === room.id ? 'ring-2 ring-court-gold ring-offset-2 ring-offset-court-panel' : ''
-                      }`}
-                      onClick={() => handleOpenRoomDetail(room)}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm font-bold ${statusCfg.textColor}`}>
-                            {room.number}
-                          </span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${statusCfg.bgColor} ${statusCfg.borderColor} ${statusCfg.textColor}`}>
-                            {statusCfg.label}
-                          </span>
-                        </div>
-                        <span className="text-xs font-mono text-slate-400">
-                          {room.currentCount}/{room.capacity}
-                        </span>
-                      </div>
-
-                      <div className="w-full h-1.5 rounded-full bg-court-bg/50 overflow-hidden mb-2">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            statusKey === 'full'
-                              ? 'bg-court-red'
-                              : statusKey === 'occupied'
-                              ? 'bg-court-orange'
-                              : statusKey === 'empty'
-                              ? 'bg-court-green'
-                              : 'bg-slate-500'
-                          }`}
-                          style={{ width: `${occupancyPercent}%` }}
-                        />
-                      </div>
-
-                      <div className="space-y-1 max-h-[60px] overflow-hidden">
-                        {room.detainees.slice(0, 2).map((d) => (
-                          <div key={d.id} className="flex items-center gap-1.5 text-[10px]">
-                            <User size={10} className="text-slate-500" />
-                            <span className="text-slate-300 truncate">{d.name}</span>
-                            <span className={`${DETAINEE_STATUS_LABEL[d.status].color} ml-auto flex-shrink-0`}>
-                              {DETAINEE_STATUS_LABEL[d.status].label}
+        <div className="grid grid-cols-2 gap-4 overflow-hidden min-h-0 h-full">
+          <div className="flex flex-col gap-4 overflow-hidden min-h-0">
+            <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 auto', maxHeight: '40%' }}>
+              <div className="section-title px-4 pt-3">
+                <Shield size={14} />
+                羁押室状态
+                <span className="ml-auto text-xs font-sans text-slate-400">
+                  共 {rooms.length} 间
+                </span>
+              </div>
+              <div className="flex-1 overflow-auto px-4 pb-3">
+                <div className="grid grid-cols-2 gap-2">
+                  {rooms.map((room) => {
+                    const statusKey = getRoomStatus(room);
+                    const statusCfg = ROOM_STATUS_CONFIG[statusKey];
+                    const occupancyPercent = room.capacity > 0 ? (room.currentCount / room.capacity) * 100 : 0;
+                    return (
+                      <div
+                        key={room.id}
+                        className={`relative border rounded-lg p-2.5 cursor-pointer transition-all duration-300 hover:scale-[1.02] ${statusCfg.bgColor} ${statusCfg.borderColor} ${
+                          selectedRoom?.id === room.id ? 'ring-2 ring-court-gold ring-offset-1 ring-offset-court-panel' : ''
+                        }`}
+                        onClick={() => handleOpenRoomDetail(room)}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-xs font-bold ${statusCfg.textColor}`}>
+                              {room.number}
+                            </span>
+                            <span className={`text-[9px] px-1 py-0.5 rounded border ${statusCfg.bgColor} ${statusCfg.borderColor} ${statusCfg.textColor}`}>
+                              {statusCfg.label}
                             </span>
                           </div>
-                        ))}
-                        {room.detainees.length > 2 && (
-                          <div className="text-[10px] text-slate-500">
-                            +{room.detainees.length - 2} 人...
-                          </div>
-                        )}
-                        {room.detainees.length === 0 && room.status !== 'maintenance' && (
-                          <div className="text-[10px] text-slate-500 italic">暂无在押人员</div>
-                        )}
-                        {room.status === 'maintenance' && (
-                          <div className="text-[10px] text-slate-500 italic">维护中，暂停使用</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '1 1 auto' }}>
-            <div className="section-title px-5 pt-4">
-              <MapPinHouse size={16} />
-              押解任务列表
-              <span className="ml-auto text-xs font-sans text-slate-400">
-                共 {missions.length} 条
-              </span>
-            </div>
-            <div className="flex-1 overflow-auto px-5 pb-4">
-              <div className="space-y-3">
-                {missions.map((mission) => {
-                  const isOverdue = mission.status === 'overdue';
-                  return (
-                    <div
-                      key={mission.id}
-                      className={`border rounded-xl p-4 transition-all ${
-                        isOverdue
-                          ? 'alarm-row border-court-red/50 siren-bg'
-                          : 'border-court-border bg-court-card/30 hover:border-court-gold/30'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <UserCheck size={14} className={isOverdue ? 'text-court-red' : 'text-court-blue'} />
-                          <span className="text-sm font-medium text-slate-200">
-                            {mission.detaineeName}
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {room.currentCount}/{room.capacity}
                           </span>
                         </div>
-                        <StatusBadge type="escort" status={mission.status} />
-                      </div>
 
-                      <div className="flex items-center gap-2 mb-3 text-xs text-slate-400">
-                        <span className="px-2 py-0.5 rounded bg-court-bg/50 border border-court-border/50">
-                          {mission.fromRoom}
-                        </span>
-                        <ChevronRight size={12} className="text-slate-500" />
-                        <span className="px-2 py-0.5 rounded bg-court-blue/10 border border-court-blue/30 text-court-blue">
-                          {mission.toCourtroom}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 mb-3 text-xs">
-                        <Users size={10} className="text-slate-500" />
-                        <span className="text-slate-400">
-                          法警: {mission.escortOfficers.join('、')}
-                        </span>
-                      </div>
-
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-                          <span>押解进度</span>
-                          <span className="font-mono">{mission.progress}%</span>
-                        </div>
-                        <div className="w-full h-2 rounded-full bg-court-bg/50 overflow-hidden">
+                        <div className="w-full h-1 rounded-full bg-court-bg/50 overflow-hidden">
                           <div
                             className={`h-full rounded-full transition-all duration-500 ${
-                              isOverdue
-                                ? 'bg-gradient-to-r from-court-red to-court-red/70'
-                                : mission.progress >= 100
-                                ? 'bg-gradient-to-r from-court-green to-court-green/70'
-                                : 'bg-gradient-to-r from-court-blue to-court-blue/70'
+                              statusKey === 'full'
+                                ? 'bg-court-red'
+                                : statusKey === 'occupied'
+                                ? 'bg-court-orange'
+                                : statusKey === 'empty'
+                                ? 'bg-court-green'
+                                : 'bg-slate-500'
                             }`}
-                            style={{ width: `${mission.progress}%` }}
+                            style={{ width: `${occupancyPercent}%` }}
                           />
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
 
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 mb-3">
-                        <div className="flex items-center gap-1">
-                          <Clock size={10} />
-                          <span>出发: {mission.startTime}</span>
+            <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '1 1 auto' }}>
+              <div className="section-title px-4 pt-3">
+                <MapPinHouse size={14} />
+                押解任务列表
+                <span className="ml-auto text-xs font-sans text-slate-400">
+                  共 {missions.length} 条
+                </span>
+              </div>
+              <div className="flex-1 overflow-auto px-4 pb-3">
+                <div className="space-y-2">
+                  {missions.map((mission) => {
+                    const isOverdue = mission.status === 'overdue';
+                    const isSelected = selectedMission?.id === mission.id;
+                    return (
+                      <div
+                        key={mission.id}
+                        onClick={() => setSelectedMission(mission)}
+                        className={`border rounded-lg p-3 transition-all cursor-pointer ${
+                          isOverdue
+                            ? 'alarm-row border-court-red/50 siren-bg'
+                            : isSelected
+                            ? 'border-court-gold/60 bg-court-gold/5 ring-1 ring-court-gold/30'
+                            : 'border-court-border bg-court-card/30 hover:border-court-gold/30'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between mb-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <UserCheck size={12} className={isOverdue ? 'text-court-red' : 'text-court-blue'} />
+                            <span className="text-xs font-medium text-slate-200">
+                              {mission.detaineeName}
+                            </span>
+                          </div>
+                          <StatusBadge type="escort" status={mission.status} />
                         </div>
-                        <div className={`flex items-center gap-1 ${isOverdue ? 'text-court-red' : ''}`}>
-                          {isOverdue && <AlertTriangle size={10} />}
-                          <span>
-                            {isOverdue
-                              ? `超期 ${getOverdueDuration(mission.startTime, mission.expectedReturn)}`
-                              : `预计返回: ${mission.expectedReturn}`}
+
+                        <div className="flex items-center gap-1.5 mb-2 text-[10px] text-slate-400">
+                          <span className="px-1.5 py-0.5 rounded bg-court-bg/50 border border-court-border/50">
+                            {mission.fromRoom}
+                          </span>
+                          <ChevronRight size={10} className="text-slate-500" />
+                          <span className="px-1.5 py-0.5 rounded bg-court-blue/10 border border-court-blue/30 text-court-blue">
+                            {mission.toCourtroom}
                           </span>
                         </div>
-                      </div>
 
-                      <div className="flex gap-2">
-                        {mission.status === 'planned' && (
-                          <button
-                            onClick={() => handleExecuteMission(mission)}
-                            className="flex-1 btn-primary text-xs py-1.5 flex items-center justify-center gap-1"
-                          >
-                            <Play size={12} />
-                            开始执行
-                          </button>
-                        )}
-                        {mission.status === 'in_progress' && (
-                          <button
-                            onClick={() => completeMission(mission.id)}
-                            className="flex-1 btn-primary text-xs py-1.5 flex items-center justify-center gap-1"
-                          >
-                            <Check size={12} />
-                            完成押解
-                          </button>
-                        )}
-                        {isOverdue && (
-                          <button
-                            onClick={() => {
-                              setSelectedMission(mission);
-                              triggerAlarm(mission.id);
-                            }}
-                            className="flex-1 btn-danger text-xs py-1.5 flex items-center justify-center gap-1"
-                          >
-                            <AlertCircle size={12} />
-                            紧急处置
-                          </button>
-                        )}
-                        {mission.status === 'completed' && (
-                          <div className="flex-1 text-center text-xs text-court-green py-1.5 flex items-center justify-center gap-1">
-                            <Check size={12} />
-                            任务已完成
+                        <div className="mb-2">
+                          <div className="flex items-center justify-between text-[9px] text-slate-500 mb-0.5">
+                            <span>进度</span>
+                            <span className="font-mono">{mission.progress}%</span>
                           </div>
-                        )}
+                          <div className="w-full h-1.5 rounded-full bg-court-bg/50 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                isOverdue
+                                  ? 'bg-gradient-to-r from-court-red to-court-red/70'
+                                  : mission.progress >= 100
+                                  ? 'bg-gradient-to-r from-court-green to-court-green/70'
+                                  : 'bg-gradient-to-r from-court-blue to-court-blue/70'
+                              }`}
+                              style={{ width: `${mission.progress}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] text-slate-500">
+                          <div className="flex items-center gap-0.5">
+                            <Clock size={9} />
+                            <span>{mission.startTime.split(' ')[1] || mission.startTime}</span>
+                          </div>
+                          <div className={`flex items-center gap-0.5 ${isOverdue ? 'text-court-red' : ''}`}>
+                            {isOverdue && <AlertTriangle size={9} />}
+                            <span>
+                              {isOverdue
+                                ? `超期`
+                                : `→ ${mission.expectedReturn.split(' ')[1] || mission.expectedReturn}`}
+                            </span>
+                          </div>
+                        </div>
                       </div>
+                    );
+                  })}
+                  {missions.length === 0 && (
+                    <div className="text-center py-6 text-slate-500 text-xs">
+                      暂无押解任务
                     </div>
-                  );
-                })}
-                {missions.length === 0 && (
-                  <div className="text-center py-8 text-slate-500 text-sm">
-                    暂无押解任务
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>
+          </div>
 
-          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 35%' }}>
-            <div className="section-title px-5 pt-4">
-              <AlertOctagon size={16} className="text-court-red" />
+          <div className="flex flex-col gap-4 overflow-hidden min-h-0">
+
+          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '0 0 auto', maxHeight: '38%' }}>
+            <div className="section-title px-4 pt-3">
+              <AlertOctagon size={14} className="text-court-red" />
               活跃警报
               {activeAlarmsData.length > 0 && (
-                <span className="ml-2 px-2.5 py-0.5 rounded-full bg-court-red/20 text-court-red text-xs font-bold border border-court-red/40 animate-pulse">
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-court-red/20 text-court-red text-[10px] font-bold border border-court-red/40 animate-pulse">
                   {activeAlarmsData.length} 条
                 </span>
               )}
             </div>
-            <div className="flex-1 overflow-auto px-5 pb-4">
-              <div className="space-y-3">
+            <div className="flex-1 overflow-auto px-4 pb-3">
+              <div className="space-y-2">
                 {activeAlarmsData.map((mission) => {
                   const alarmInfo = getAlarmLevel(mission);
-                  const isHandled = isAlarmFullyHandled(mission.id);
-                  const actions = alarmActions[mission.id] || { contacted: false, forced: false, reported: false };
-                  const isDisposing = actions.contacted && !actions.forced;
+                  const isSelected = selectedMission?.id === mission.id;
                   return (
                     <div
                       key={mission.id}
-                      className={`border rounded-xl p-4 transition-all ${
-                        isHandled
-                          ? 'border-court-green/30 bg-court-green/5'
-                          : `border-court-red/40 ${!isHandled ? 'alarm-item-flash' : 'bg-court-red/10'}`
+                      onClick={() => setSelectedMission(mission)}
+                      className={`border rounded-xl p-3 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-court-gold/60 bg-court-gold/5 ring-1 ring-court-gold/30'
+                          : mission.status === 'disposing'
+                          ? 'border-court-orange/40 bg-court-orange/10'
+                          : 'border-court-red/40 alarm-item-flash bg-court-red/10'
                       }`}
                     >
-                      <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`px-2 py-0.5 rounded text-xs font-bold border ${
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
                               alarmInfo.level === '严重'
                                 ? 'bg-court-red/20 text-court-red border-court-red/40'
                                 : 'bg-court-orange/20 text-court-orange border-court-orange/40'
@@ -650,58 +553,89 @@ export const DetentionPage: React.FC = () => {
                             {alarmInfo.level}警报
                           </span>
                         </div>
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded font-medium ${
-                            isHandled
-                              ? 'bg-court-green/20 text-court-green border border-court-green/30'
-                              : isDisposing
-                              ? 'bg-court-orange/20 text-court-orange border border-court-orange/30'
-                              : 'bg-court-red/20 text-court-red border border-court-red/30'
-                          }`}
-                        >
-                          {isHandled ? '已归位' : isDisposing ? '处置中' : '待处置'}
-                        </span>
+                        <StatusBadge type="escort" status={mission.status} />
                       </div>
 
-                      <div className="mb-3">
-                        <p className="text-sm text-slate-200 mb-1 font-medium">
+                      <div className="mb-2">
+                        <p className="text-sm text-slate-200 font-medium">
                           {mission.detaineeName}
                         </p>
-                        <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
+                        <div className="flex items-center gap-1 text-[10px] text-slate-400">
                           <MapPinHouse size={10} />
                           <span>{mission.fromRoom} → {mission.toCourtroom}</span>
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-court-red font-medium">
-                          <AlertTriangle size={12} />
-                          <span>超期 {getOverdueDuration(mission.startTime, mission.expectedReturn)}</span>
-                        </div>
                       </div>
 
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleAlarmContact(mission.id)}
-                          disabled={actions.contacted || actions.forced}
-                          className={`flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all ${
-                            actions.contacted
-                              ? 'bg-court-green/15 text-court-green border border-court-green/30'
-                              : 'bg-court-card border border-court-border text-slate-300 hover:border-court-blue/50 hover:text-court-blue'
-                          }`}
-                        >
-                          {actions.contacted ? <Check size={12} /> : <Phone size={12} />}
-                          <span>{actions.contacted ? '已联系' : '处置中'}</span>
-                        </button>
-                        <button
-                          onClick={() => handleAlarmForce(mission.id)}
-                          disabled={actions.forced}
-                          className={`flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all ${
-                            actions.forced
-                              ? 'bg-court-green/15 text-court-green border border-court-green/30'
-                              : 'bg-court-red/15 text-court-red border border-court-red/40 hover:bg-court-red/25'
-                          }`}
-                        >
-                          {actions.forced ? <Check size={12} /> : <UserCheck size={12} />}
-                          <span>{actions.forced ? '已归位' : '确认归位'}</span>
-                        </button>
+                      {mission.disposalRecords && mission.disposalRecords.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-court-border/50">
+                          <div className="flex flex-col gap-1">
+                            {mission.disposalRecords.map((record, idx) => {
+                              const cfg = DISPOSAL_ICON_CONFIG[record.action];
+                              const Icon = cfg.icon;
+                              return (
+                                <div key={idx} className="flex items-center gap-1.5">
+                                  <div className={`w-4 h-4 rounded-full flex items-center justify-center border ${cfg.bgColor}`}>
+                                    <Icon size={8} className={cfg.color} />
+                                  </div>
+                                  <span className={`text-[10px] ${cfg.color}`}>
+                                    {cfg.label}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 ml-auto">
+                                    {record.timestamp.split(' ')[1] || record.timestamp}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-1.5 mt-2">
+                        {mission.status === 'overdue' && (
+                          <>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); startDisposal(mission.id); }}
+                              className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-orange/15 text-court-orange border border-court-orange/40 hover:bg-court-orange/25 transition-all"
+                            >
+                              <Shield size={10} />
+                              处置中
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); completeMission(mission.id); }}
+                              className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-green/15 text-court-green border border-court-green/40 hover:bg-court-green/25 transition-all"
+                            >
+                              <CheckCircle size={10} />
+                              确认归位
+                            </button>
+                          </>
+                        )}
+                        {mission.status === 'disposing' && (
+                          <>
+                            <span className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-orange/10 text-court-orange border border-court-orange/30 opacity-70 cursor-not-allowed">
+                              <Shield size={10} className="animate-pulse" />
+                              处置中...
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); completeMission(mission.id); }}
+                              className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-green/15 text-court-green border border-court-green/40 hover:bg-court-green/25 transition-all"
+                            >
+                              <CheckCircle size={10} />
+                              确认归位
+                            </button>
+                          </>
+                        )}
+                        {mission.status === 'completed' && (
+                          <span className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-green/15 text-court-green border border-court-green/40">
+                            <CheckCircle size={10} />
+                            已完成
+                          </span>
+                        )}
+                        {mission.status === 'in_progress' && (
+                          <span className="flex-1 py-1.5 rounded-lg text-[10px] flex items-center justify-center gap-1 bg-court-blue/10 text-court-blue border border-court-blue/30">
+                            <Play size={10} />
+                            押解进行中
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -714,6 +648,209 @@ export const DetentionPage: React.FC = () => {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="glass-panel overflow-hidden flex flex-col min-h-0" style={{ flex: '1 1 auto' }}>
+            <div className="section-title px-4 pt-3">
+              <MapPinHouse size={14} />
+              任务详情
+              <span className="ml-auto text-[10px] font-sans text-slate-400">
+                {selectedMission ? `ID: ${selectedMission.id}` : '未选择'}
+              </span>
+            </div>
+            <div className="flex-1 overflow-auto px-4 pb-3">
+              {selectedMission ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-serif font-bold text-court-goldLight">
+                        {selectedMission.detaineeName}
+                      </h3>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <StatusBadge type="escort" status={selectedMission.status} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-court-card/30 border border-court-border space-y-1.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <MapPinHouse size={12} className="text-slate-500" />
+                      <span className="text-slate-400">路线:</span>
+                      <span className="px-2 py-0.5 rounded bg-court-bg/50 border border-court-border/50 text-slate-300">
+                        {selectedMission.fromRoom}
+                      </span>
+                      <ArrowRight size={10} className="text-slate-500" />
+                      <span className="px-2 py-0.5 rounded bg-court-blue/10 border border-court-blue/30 text-court-blue">
+                        {selectedMission.toCourtroom}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Users size={12} className="text-slate-500" />
+                      <span className="text-slate-400">法警:</span>
+                      <span className="text-slate-300">{selectedMission.escortOfficers.join('、')}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs">
+                      <div className="flex items-center gap-1">
+                        <Clock size={12} className="text-slate-500" />
+                        <span className="text-slate-400">出发:</span>
+                        <span className="text-slate-300">{selectedMission.startTime}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock size={12} className={selectedMission.status === 'overdue' ? 'text-court-red' : 'text-slate-500'} />
+                        <span className="text-slate-400">预计返回:</span>
+                        <span className={selectedMission.status === 'overdue' ? 'text-court-red' : 'text-slate-300'}>
+                          {selectedMission.expectedReturn}
+                        </span>
+                      </div>
+                    </div>
+                    {selectedMission.status === 'overdue' && (
+                      <div className="flex items-center gap-1 text-xs text-court-red font-medium">
+                        <AlertTriangle size={12} />
+                        <span>超期 {getOverdueDuration(selectedMission.startTime, selectedMission.expectedReturn)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                      <span>押解进度</span>
+                      <span className="font-mono">{selectedMission.progress}%</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-court-bg/50 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          selectedMission.status === 'overdue' || selectedMission.status === 'disposing'
+                            ? 'bg-gradient-to-r from-court-red to-court-red/70'
+                            : selectedMission.progress >= 100
+                            ? 'bg-gradient-to-r from-court-green to-court-green/70'
+                            : 'bg-gradient-to-r from-court-blue to-court-blue/70'
+                        }`}
+                        style={{ width: `${selectedMission.progress}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-1.5">
+                    {selectedMission.status === 'overdue' && (
+                      <>
+                        <button
+                          onClick={() => startDisposal(selectedMission.id)}
+                          className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-gradient-to-r from-court-orange to-court-orange/80 text-white border border-court-orange/50 hover:from-court-orange/90 hover:to-court-orange/70 transition-all shadow-lg shadow-court-orange/20"
+                        >
+                          <Shield size={13} />
+                          处置中
+                        </button>
+                        <button
+                          onClick={() => completeMission(selectedMission.id)}
+                          className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-gradient-to-r from-court-green to-court-green/80 text-white border border-court-green/50 hover:from-court-green/90 hover:to-court-green/70 transition-all shadow-lg shadow-court-green/20"
+                        >
+                          <CheckCircle size={13} />
+                          确认归位
+                        </button>
+                      </>
+                    )}
+                    {selectedMission.status === 'disposing' && (
+                      <>
+                        <span className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-court-orange/15 text-court-orange border border-court-orange/40 cursor-not-allowed opacity-80">
+                          <Shield size={13} className="animate-pulse" />
+                          处置中...
+                        </span>
+                        <button
+                          onClick={() => completeMission(selectedMission.id)}
+                          className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-gradient-to-r from-court-green to-court-green/80 text-white border border-court-green/50 hover:from-court-green/90 hover:to-court-green/70 transition-all shadow-lg shadow-court-green/20"
+                        >
+                          <CheckCircle size={13} />
+                          确认归位
+                        </button>
+                      </>
+                    )}
+                    {selectedMission.status === 'completed' && (
+                      <span className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-court-green/15 text-court-green border border-court-green/40">
+                        <CheckCircle size={13} />
+                        已完成
+                      </span>
+                    )}
+                    {selectedMission.status === 'in_progress' && (
+                      <span className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 bg-court-blue/15 text-court-blue border border-court-blue/40">
+                        <Play size={13} />
+                        押解进行中
+                      </span>
+                    )}
+                    {selectedMission.status === 'planned' && (
+                      <button
+                        onClick={() => handleExecuteMission(selectedMission)}
+                        className="flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1 btn-primary"
+                      >
+                        <Play size={13} />
+                        开始执行
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Clock size={12} className="text-court-gold" />
+                      <h4 className="text-xs font-medium text-slate-200">处置记录</h4>
+                    </div>
+                    {selectedMission.disposalRecords && selectedMission.disposalRecords.length > 0 ? (
+                      <div className="relative pl-4">
+                        <div className="absolute left-1 top-1 bottom-1 w-px bg-gradient-to-b from-court-red via-court-orange to-court-green" />
+                        <div className="space-y-2.5">
+                          {selectedMission.disposalRecords.map((record, idx) => {
+                            const cfg = DISPOSAL_ICON_CONFIG[record.action];
+                            const Icon = cfg.icon;
+                            return (
+                              <div key={idx} className="relative">
+                                <div className={`absolute -left-[18px] top-0 w-5 h-5 rounded-full flex items-center justify-center border ${cfg.bgColor}`}>
+                                  <Icon size={10} className={cfg.color} />
+                                </div>
+                                <div className="p-2 rounded-lg bg-court-card/30 border border-court-border">
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <span className={`text-xs font-medium ${cfg.color}`}>
+                                      {cfg.label}
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 font-mono">
+                                      {record.timestamp}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                    <User size={9} />
+                                    <span>操作人: {record.operator}</span>
+                                    {record.operatorRole && (
+                                      <span className="px-1 py-0.5 rounded bg-court-bg/50 text-[9px] text-slate-400">
+                                        {record.operatorRole === 'clerk' ? '书记员' :
+                                         record.operatorRole === 'judge' ? '法官' :
+                                         record.operatorRole === 'chief' ? '庭长' :
+                                         record.operatorRole === 'president' ? '院长' : record.operatorRole}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {record.note && (
+                                    <p className="text-[10px] text-slate-500 mt-1 italic">
+                                      {record.note}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-4 text-slate-500 text-xs border border-dashed border-court-border rounded-lg">
+                        暂无处置记录
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 py-8">
+                  <MapPinHouse size={32} className="text-slate-600 mb-2" />
+                  <p className="text-xs">选择押解任务查看详情和处置记录</p>
+                  <p className="text-[10px] text-slate-600 mt-0.5">点击左侧任务卡片查看</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -18,6 +18,7 @@ const HEARING_CONFIG: Record<HearingStatus, { label: string; color: string; icon
 const ESCORT_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   planned: { label: '待执行', color: 'bg-slate-500/20 text-slate-300 border-slate-500/40', icon: Clock },
   in_progress: { label: '押解中', color: 'bg-court-blue/20 text-court-blue border-court-blue/40', icon: Play },
+  disposing: { label: '处置中', color: 'bg-court-orange/20 text-court-orange border-court-orange/40 animate-pulse', icon: AlertTriangle },
   completed: { label: '已完成', color: 'bg-court-green/20 text-court-green border-court-green/40', icon: CheckCircle },
   overdue: { label: '超期未归', color: 'bg-court-red/20 text-court-red border-court-red/40 animate-pulse', icon: AlertTriangle },
 };

@@ -19,6 +19,7 @@ interface DetentionState {
   completeMission: (missionId: string) => void;
   updateMissionProgress: (missionId: string, progress: number) => void;
   triggerAlarm: (missionId: string) => void;
+  startDisposal: (missionId: string) => void;
   dismissAlarm: (missionId: string) => void;
   getTotalDetainees: () => number;
   getEscortingCount: () => number;
@@ -75,6 +76,7 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
         { x: 0, y: 0, z: 0 },
       ],
       terminalPushed: true,
+      disposalRecords: [],
     };
 
     set((s) => ({
@@ -146,6 +148,7 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
     const mission = get().missions.find((m) => m.id === missionId);
     if (!mission) return;
 
+    const user = useAuthStore.getState().currentUser;
     const timeoutId = missionTimeoutMap.get(missionId);
     if (timeoutId) {
       clearTimeout(timeoutId);
@@ -154,7 +157,23 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
 
     set((s) => ({
       missions: s.missions.map((m) =>
-        m.id === missionId ? { ...m, status: 'completed', progress: 100 } : m
+        m.id === missionId
+          ? {
+              ...m,
+              status: 'completed',
+              progress: 100,
+              disposalRecords: [
+                ...m.disposalRecords,
+                {
+                  action: 'complete_return' as const,
+                  operator: user?.name || '系统',
+                  operatorRole: user?.role,
+                  timestamp: new Date().toLocaleString('zh-CN'),
+                  note: '人员已安全归位',
+                },
+              ],
+            }
+          : m
       ),
       rooms: s.rooms.map((r) => ({
         ...r,
@@ -186,12 +205,28 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
   },
 
   triggerAlarm: (missionId) => {
+    const user = useAuthStore.getState().currentUser;
     set((s) => ({
       activeAlarms: s.activeAlarms.includes(missionId)
         ? s.activeAlarms
         : [...s.activeAlarms, missionId],
       missions: s.missions.map((m) =>
-        m.id === missionId ? { ...m, status: 'overdue' } : m
+        m.id === missionId
+          ? {
+              ...m,
+              status: 'overdue',
+              disposalRecords: [
+                ...m.disposalRecords,
+                {
+                  action: 'trigger_alarm' as const,
+                  operator: user?.name || '系统',
+                  operatorRole: user?.role,
+                  timestamp: new Date().toLocaleString('zh-CN'),
+                  note: '系统自动触发超时警报',
+                },
+              ],
+            }
+          : m
       ),
     }));
     savePersist(PERSIST_KEY, {
@@ -205,7 +240,45 @@ export const useDetentionStore = create<DetentionState>((set, get) => ({
     }
   },
 
+  startDisposal: (missionId) => {
+    const user = useAuthStore.getState().currentUser;
+    if (!user) return;
+
+    set((s) => ({
+      missions: s.missions.map((m) =>
+        m.id === missionId
+          ? {
+              ...m,
+              status: 'disposing',
+              disposalRecords: [
+                ...m.disposalRecords,
+                {
+                  action: 'start_disposal' as const,
+                  operator: user.name,
+                  operatorRole: user.role,
+                  timestamp: new Date().toLocaleString('zh-CN'),
+                  note: '已联系法警处置',
+                },
+              ],
+            }
+          : m
+      ),
+    }));
+    savePersist(PERSIST_KEY, {
+      rooms: get().rooms,
+      missions: get().missions,
+      activeAlarms: get().activeAlarms,
+    });
+    const mission = get().missions.find((m) => m.id === missionId);
+    if (mission) {
+      useAuthStore.getState().recordLog('开始处置押解警报', mission.detaineeName);
+    }
+  },
+
   dismissAlarm: (missionId) => {
+    const mission = get().missions.find((m) => m.id === missionId);
+    if (!mission || mission.status !== 'completed') return;
+
     set((s) => ({
       activeAlarms: s.activeAlarms.filter((id) => id !== missionId),
     }));

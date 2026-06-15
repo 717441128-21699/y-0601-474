@@ -17,6 +17,11 @@ import {
   Monitor,
   FileText,
   FolderOpen,
+  FileStack,
+  Cpu,
+  Shield,
+  Presentation,
+  Video,
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { useCourtStore } from '../store/useCourtStore';
@@ -85,11 +90,27 @@ interface ScheduleFormData {
   equipment: string[];
 }
 
+interface ConflictInfo {
+  hasConflict: boolean;
+  type: 'none' | 'high-high' | 'high-low' | 'overlap';
+  conflictingCase?: CourtCase;
+}
+
+interface SuitabilityInfo {
+  suitableTypes: CaseType[];
+  hasRemoteTerminal: boolean;
+  hasEvidenceDisplay: boolean;
+  capacity: number;
+}
+
 interface CourtRecommendation {
   courtroom: import('../types').Courtroom;
   score: number;
   reason: string;
   equipment: string[];
+  conflictInfo: ConflictInfo;
+  suitability: SuitabilityInfo;
+  matchingDetails: string[];
 }
 
 export const CourtroomPage: React.FC = () => {
@@ -121,9 +142,10 @@ export const CourtroomPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<HearingStatus | 'all'>('all');
   const [approvalComments, setApprovalComments] = useState<Record<string, string>>({});
   const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number; delay: number }>>([]);
-  const [courtroomDetailTab, setCourtroomDetailTab] = useState<'schedule' | 'dossiers'>('schedule');
+  const [courtroomDetailTab, setCourtroomDetailTab] = useState<'todayCases' | 'dossiers' | 'approvals'>('todayCases');
 
   const [recommendation, setRecommendation] = useState<CourtRecommendation | null>(null);
+  const [usedRecommendation, setUsedRecommendation] = useState(false);
   const [conflictInfo, setConflictInfo] = useState<{
     hasConflict: boolean;
     isHighHigh: boolean;
@@ -257,6 +279,23 @@ export const CourtroomPage: React.FC = () => {
     return getDossiersByCourtroom(selectedCourtroom.id);
   }, [selectedCourtroom, getDossiersByCourtroom]);
 
+  const selectedCourtroomTodayCases = useMemo(() => {
+    if (!selectedCourtroom) return [];
+    const todayStr = new Date().toLocaleDateString('zh-CN');
+    return cases.filter((c) => {
+      const caseDate = new Date(c.scheduledTime).toLocaleDateString('zh-CN');
+      return caseDate === todayStr && c.courtroomId === selectedCourtroom.id;
+    });
+  }, [selectedCourtroom, cases]);
+
+  const selectedCourtroomApprovals = useMemo(() => {
+    if (!selectedCourtroom) return [];
+    return approvals.filter((a) => {
+      const relatedCase = cases.find((c) => c.caseNumber === a.caseNumber);
+      return relatedCase && relatedCase.courtroomId === selectedCourtroom.id;
+    });
+  }, [selectedCourtroom, approvals, cases]);
+
   const getCaseTimePosition = (c: CourtCase) => {
     try {
       const date = new Date(c.scheduledTime);
@@ -297,6 +336,7 @@ export const CourtroomPage: React.FC = () => {
       courtroomId: recommendation.courtroom.id,
       equipment: recommendation.equipment,
     }));
+    setUsedRecommendation(true);
   };
 
   const getStageRoleLabel = (stage: ApprovalStage): string => {
@@ -334,6 +374,10 @@ export const CourtroomPage: React.FC = () => {
       estimatedDuration: 60,
       courtroomId: formData.courtroomId,
       equipment: formData.equipment,
+      ...(usedRecommendation && recommendation && {
+        autoAssigned: true,
+        assignReason: recommendation.reason,
+      }),
     });
     setShowScheduleModal(false);
     setFormData({
@@ -349,6 +393,7 @@ export const CourtroomPage: React.FC = () => {
       equipment: [],
     });
     setRecommendation(null);
+    setUsedRecommendation(false);
     setConflictInfo({ hasConflict: false, isHighHigh: false });
   };
 
@@ -574,254 +619,430 @@ export const CourtroomPage: React.FC = () => {
         </div>
 
         <div className="col-span-3 flex flex-col gap-6 overflow-hidden">
-          <div className="glass-panel flex-1 overflow-hidden flex flex-col min-h-0">
+          <div className="glass-panel overflow-hidden flex flex-col" style={{ maxHeight: '45%' }}>
+            <div className="flex items-center justify-between px-6 pt-5 border-b border-court-border">
+              <div className="section-title !border-b-0 !pb-4">
+                <Gavel size={18} />
+                法庭排期列表
+              </div>
+              <span className="text-xs font-sans text-slate-400">
+                共 {courtroomRows.length} 个法庭 · {filteredCases.length} 件案件
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-auto px-6 pb-6 pt-4">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-xs text-slate-400 border-b border-court-border">
+                    <th className="text-left pb-3 font-medium">法庭名称</th>
+                    <th className="text-left pb-3 font-medium">当前案件</th>
+                    <th className="text-left pb-3 font-medium">当事人</th>
+                    <th className="text-left pb-3 font-medium">审判长</th>
+                    <th className="text-left pb-3 font-medium">状态</th>
+                    <th className="text-right pb-3 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {courtroomRows.map(({ courtroom, activeCase }) => (
+                    <tr
+                      key={courtroom.id}
+                      className={`border-b border-court-border/50 hover:bg-court-gold/5 transition-colors cursor-pointer ${
+                        selectedCourtroom?.id === courtroom.id ? 'bg-court-gold/10' : ''
+                      }`}
+                      onClick={() => {
+                        setSelectedCourtroom(courtroom);
+                        setSelectedCase(activeCase || null);
+                      }}
+                    >
+                      <td className="py-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              courtroom.status === 'occupied'
+                                ? 'bg-court-blue animate-pulse'
+                                : courtroom.status === 'available'
+                                ? 'bg-court-green'
+                                : 'bg-court-orange'
+                            }`}
+                          />
+                          <div>
+                            <p className="text-sm font-medium text-slate-200">
+                              {courtroom.name}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {courtroom.floor}楼 · {courtroom.capacity}座
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-4">
+                        {activeCase ? (
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm text-slate-200 font-mono">
+                                {activeCase.caseNumber}
+                              </p>
+                              {activeCase.autoAssigned && (
+                                <span
+                                  title={activeCase.assignReason || '智能系统自动分配'}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-court-gold/25 to-court-gold/15 text-[10px] font-medium text-court-gold border border-court-gold/40 cursor-help shadow-[0_0_8px_rgba(201,168,108,0.15)]"
+                                >
+                                  <Sparkles size={9} className="fill-court-gold/30" />
+                                  自动分配
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {activeCase.title}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-4">
+                        {activeCase ? (
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <Users size={10} className="text-slate-500" />
+                              <span className="text-slate-400">原:</span>
+                              <span className="text-slate-300 truncate max-w-[80px]">
+                                {activeCase.parties.plaintiff}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <Users size={10} className="text-slate-500" />
+                              <span className="text-slate-400">被:</span>
+                              <span className="text-slate-300 truncate max-w-[80px]">
+                                {activeCase.parties.defendant}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-4">
+                        {activeCase ? (
+                          <span className="text-sm text-slate-300">
+                            {activeCase.panel.chiefJudge}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-4">
+                        {activeCase ? (
+                          <StatusBadge type="hearing" status={activeCase.status} />
+                        ) : courtroom.status === 'maintenance' ? (
+                          <span className="status-badge border bg-court-orange/20 text-court-orange border-court-orange/40">
+                            维护中
+                          </span>
+                        ) : (
+                          <span className="status-badge border bg-court-green/20 text-court-green border-court-green/40">
+                            空闲
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-4 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCourtroom(courtroom);
+                            setSelectedCase(activeCase || null);
+                          }}
+                          className="px-3 py-1.5 text-xs text-court-gold border border-court-gold/40 rounded-lg hover:bg-court-gold/10 transition-colors inline-flex items-center gap-1"
+                        >
+                          <Info size={12} />
+                          查看详情
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="glass-panel overflow-hidden flex flex-col flex-1 min-h-0">
             <div className="flex items-center justify-between px-6 pt-5 border-b border-court-border">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setCourtroomDetailTab('schedule')}
-                  className={`section-title !border-b-2 !pb-4 !px-0 transition-colors ${
-                    courtroomDetailTab === 'schedule'
+                  onClick={() => setCourtroomDetailTab('todayCases')}
+                  className={`section-title !border-b-2 !pb-4 !px-0 transition-colors !flex !items-center !gap-1.5 ${
+                    courtroomDetailTab === 'todayCases'
                       ? '!text-court-gold !border-court-gold'
                       : '!text-slate-400 !border-transparent hover:!text-slate-300'
                   }`}
                 >
-                  <Gavel size={18} />
-                  法庭排期列表
+                  <Calendar size={16} />
+                  当日排庭
+                  {selectedCourtroom && selectedCourtroomTodayCases.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-court-gold/20 text-court-gold text-[10px] border border-court-gold/40">
+                      {selectedCourtroomTodayCases.length}
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => setCourtroomDetailTab('dossiers')}
-                  className={`section-title !border-b-2 !pb-4 !px-0 transition-colors ml-6 ${
+                  className={`section-title !border-b-2 !pb-4 !px-0 transition-colors ml-6 !flex !items-center !gap-1.5 ${
                     courtroomDetailTab === 'dossiers'
                       ? '!text-court-gold !border-court-gold'
                       : '!text-slate-400 !border-transparent hover:!text-slate-300'
                   }`}
                 >
-                  <FolderOpen size={18} />
+                  <FileStack size={16} />
                   关联案卷
                   {selectedCourtroom && courtroomDossiers.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 rounded-full bg-court-gold/20 text-court-gold text-xs border border-court-gold/40">
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-court-gold/20 text-court-gold text-[10px] border border-court-gold/40">
                       {courtroomDossiers.length}
                     </span>
                   )}
                 </button>
+                <button
+                  onClick={() => setCourtroomDetailTab('approvals')}
+                  className={`section-title !border-b-2 !pb-4 !px-0 transition-colors ml-6 !flex !items-center !gap-1.5 ${
+                    courtroomDetailTab === 'approvals'
+                      ? '!text-court-gold !border-court-gold'
+                      : '!text-slate-400 !border-transparent hover:!text-slate-300'
+                  }`}
+                >
+                  <AlertTriangle size={16} />
+                  冲突与审批
+                  {selectedCourtroom && selectedCourtroomApprovals.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-court-orange/20 text-court-orange text-[10px] border border-court-orange/40">
+                      {selectedCourtroomApprovals.length}
+                    </span>
+                  )}
+                </button>
               </div>
-              {courtroomDetailTab === 'schedule' && (
-                <span className="text-xs font-sans text-slate-400">
-                  共 {courtroomRows.length} 个法庭 · {filteredCases.length} 件案件
+              {selectedCourtroom && (
+                <span className="text-xs font-sans text-court-gold">
+                  {selectedCourtroom.name}
                 </span>
               )}
             </div>
 
-            {courtroomDetailTab === 'schedule' ? (
-              <div className="flex-1 overflow-auto px-6 pb-6 pt-4">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-xs text-slate-400 border-b border-court-border">
-                      <th className="text-left pb-3 font-medium">法庭名称</th>
-                      <th className="text-left pb-3 font-medium">当前案件</th>
-                      <th className="text-left pb-3 font-medium">当事人</th>
-                      <th className="text-left pb-3 font-medium">审判长</th>
-                      <th className="text-left pb-3 font-medium">状态</th>
-                      <th className="text-right pb-3 font-medium">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {courtroomRows.map(({ courtroom, activeCase }) => (
-                      <tr
-                        key={courtroom.id}
-                        className={`border-b border-court-border/50 hover:bg-court-gold/5 transition-colors cursor-pointer ${
-                          selectedCourtroom?.id === courtroom.id ? 'bg-court-gold/10' : ''
-                        }`}
-                        onClick={() => {
-                          setSelectedCourtroom(courtroom);
-                          setSelectedCase(activeCase || null);
-                        }}
-                      >
-                        <td className="py-4">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`w-2 h-2 rounded-full ${
-                                courtroom.status === 'occupied'
-                                  ? 'bg-court-blue animate-pulse'
-                                  : courtroom.status === 'available'
-                                  ? 'bg-court-green'
-                                  : 'bg-court-orange'
-                              }`}
-                            />
-                            <div>
-                              <p className="text-sm font-medium text-slate-200">
-                                {courtroom.name}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {courtroom.floor}楼 · {courtroom.capacity}座
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4">
-                          {activeCase ? (
-                            <div>
-                              <p className="text-sm text-slate-200 font-mono">
-                                {activeCase.caseNumber}
-                              </p>
-                              <p className="text-xs text-slate-400 mt-0.5">
-                                {activeCase.title}
-                              </p>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="py-4">
-                          {activeCase ? (
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5 text-xs">
-                                <Users size={10} className="text-slate-500" />
-                                <span className="text-slate-400">原:</span>
-                                <span className="text-slate-300 truncate max-w-[80px]">
-                                  {activeCase.parties.plaintiff}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 text-xs">
-                                <Users size={10} className="text-slate-500" />
-                                <span className="text-slate-400">被:</span>
-                                <span className="text-slate-300 truncate max-w-[80px]">
-                                  {activeCase.parties.defendant}
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="py-4">
-                          {activeCase ? (
-                            <span className="text-sm text-slate-300">
-                              {activeCase.panel.chiefJudge}
-                            </span>
-                          ) : (
-                            <span className="text-sm text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="py-4">
-                          {activeCase ? (
-                            <StatusBadge type="hearing" status={activeCase.status} />
-                          ) : courtroom.status === 'maintenance' ? (
-                            <span className="status-badge border bg-court-orange/20 text-court-orange border-court-orange/40">
-                              维护中
-                            </span>
-                          ) : (
-                            <span className="status-badge border bg-court-green/20 text-court-green border-court-green/40">
-                              空闲
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-4 text-right">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedCourtroom(courtroom);
-                              setSelectedCase(activeCase || null);
-                            }}
-                            className="px-3 py-1.5 text-xs text-court-gold border border-court-gold/40 rounded-lg hover:bg-court-gold/10 transition-colors inline-flex items-center gap-1"
-                          >
-                            <Info size={12} />
-                            查看详情
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-auto px-6 pb-6 pt-4">
-                {!selectedCourtroom ? (
+            <div className="flex-1 overflow-auto px-6 pb-6 pt-4">
+              {!selectedCourtroom ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 py-16">
+                  <Info size={48} className="text-slate-600 mb-3" />
+                  <p className="text-sm">点击法庭或3D模型查看详情</p>
+                </div>
+              ) : courtroomDetailTab === 'todayCases' ? (
+                selectedCourtroomTodayCases.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 py-16">
-                    <FileText size={48} className="text-slate-600 mb-3" />
-                    <p className="text-sm">请选择法庭查看关联案卷</p>
+                    <Calendar size={48} className="text-slate-600 mb-3" />
+                    <p className="text-sm">该法庭今日暂无排庭</p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      {selectedCourtroom.name}
+                    </p>
                   </div>
-                ) : courtroomDossiers.length === 0 ? (
+                ) : (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-xs text-slate-400 border-b border-court-border">
+                        <th className="text-left pb-3 font-medium">案号</th>
+                        <th className="text-left pb-3 font-medium">案由</th>
+                        <th className="text-left pb-3 font-medium">当事人</th>
+                        <th className="text-left pb-3 font-medium">状态</th>
+                        <th className="text-left pb-3 font-medium">优先级</th>
+                        <th className="text-left pb-3 font-medium">时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedCourtroomTodayCases.map((c) => (
+                        <tr
+                          key={c.id}
+                          className="border-b border-court-border/50 hover:bg-court-gold/5 transition-colors"
+                        >
+                          <td className="py-3">
+                            <span className="text-sm text-slate-200 font-mono">
+                              {c.caseNumber}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <span className="text-sm text-slate-300">
+                              {CASE_TYPE_LABELS[c.type]}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1 text-xs">
+                                <span className="text-slate-400">原:</span>
+                                <span className="text-slate-300 truncate max-w-[100px]">
+                                  {c.parties.plaintiff}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-xs">
+                                <span className="text-slate-400">被:</span>
+                                <span className="text-slate-300 truncate max-w-[100px]">
+                                  {c.parties.defendant}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <StatusBadge type="hearing" status={c.status} />
+                          </td>
+                          <td className="py-3">
+                            <span className={`text-xs font-medium ${PRIORITY_LABELS[c.priority].color}`}>
+                              {PRIORITY_LABELS[c.priority].label}优先级
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <span className="text-xs text-slate-400 font-mono">
+                              {new Date(c.scheduledTime).toLocaleTimeString('zh-CN', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              ) : courtroomDetailTab === 'dossiers' ? (
+                courtroomDossiers.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 py-16">
-                    <FolderOpen size={48} className="text-slate-600 mb-3" />
+                    <FileStack size={48} className="text-slate-600 mb-3" />
                     <p className="text-sm">该法庭暂无关联网卷</p>
                     <p className="text-xs text-slate-600 mt-1">
                       {selectedCourtroom.name}
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-slate-400">
-                        {selectedCourtroom.name} · 共 {courtroomDossiers.length} 个案卷
-                      </p>
-                    </div>
-                    <table className="w-full">
-                      <thead>
-                        <tr className="text-xs text-slate-400 border-b border-court-border">
-                          <th className="text-left pb-3 font-medium">案卷名称</th>
-                          <th className="text-left pb-3 font-medium">案号</th>
-                          <th className="text-left pb-3 font-medium">状态</th>
-                          <th className="text-left pb-3 font-medium">提交人</th>
-                          <th className="text-left pb-3 font-medium">提交时间</th>
-                          <th className="text-right pb-3 font-medium">操作</th>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-xs text-slate-400 border-b border-court-border">
+                        <th className="text-left pb-3 font-medium">案卷名称</th>
+                        <th className="text-left pb-3 font-medium">案号</th>
+                        <th className="text-left pb-3 font-medium">状态</th>
+                        <th className="text-left pb-3 font-medium">提交人</th>
+                        <th className="text-left pb-3 font-medium">提交时间</th>
+                        <th className="text-right pb-3 font-medium">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {courtroomDossiers.map((dossier) => (
+                        <tr
+                          key={dossier.id}
+                          className="border-b border-court-border/50 hover:bg-court-gold/5 transition-colors cursor-pointer"
+                          onClick={() => {
+                            setSelectedDossier(dossier);
+                          }}
+                        >
+                          <td className="py-3">
+                            <div className="flex items-center gap-2">
+                              <FileText size={14} className="text-court-gold" />
+                              <span className="text-sm text-slate-200">
+                                {dossier.name}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <span className="text-xs text-slate-400 font-mono">
+                              {dossier.caseNumber}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <StatusBadge type="dossier" status={dossier.status} />
+                          </td>
+                          <td className="py-3">
+                            <span className="text-xs text-slate-400">
+                              {dossier.submittedBy}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <span className="text-xs text-slate-400 font-mono">
+                              {dossier.submittedAt}
+                            </span>
+                          </td>
+                          <td className="py-3 text-right">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDossier(dossier);
+                              }}
+                              className="px-3 py-1 text-xs text-court-gold border border-court-gold/40 rounded-lg hover:bg-court-gold/10 transition-colors inline-flex items-center gap-1"
+                            >
+                              <Info size={12} />
+                              查看
+                            </button>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {courtroomDossiers.map((dossier) => (
-                          <tr
-                            key={dossier.id}
-                            className="border-b border-court-border/50 hover:bg-court-gold/5 transition-colors cursor-pointer"
-                            onClick={() => {
-                              setSelectedDossier(dossier);
-                            }}
-                          >
-                            <td className="py-3">
-                              <div className="flex items-center gap-2">
-                                <FileText size={14} className="text-court-gold" />
-                                <span className="text-sm text-slate-200">
-                                  {dossier.name}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-3">
-                              <span className="text-xs text-slate-400 font-mono">
-                                {dossier.caseNumber}
-                              </span>
-                            </td>
-                            <td className="py-3">
-                              <StatusBadge type="dossier" status={dossier.status} />
-                            </td>
-                            <td className="py-3">
-                              <span className="text-xs text-slate-400">
-                                {dossier.submittedBy}
-                              </span>
-                            </td>
-                            <td className="py-3">
-                              <span className="text-xs text-slate-400 font-mono">
-                                {dossier.submittedAt}
-                              </span>
-                            </td>
-                            <td className="py-3 text-right">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedDossier(dossier);
-                                }}
-                                className="px-3 py-1 text-xs text-court-gold border border-court-gold/40 rounded-lg hover:bg-court-gold/10 transition-colors inline-flex items-center gap-1"
-                              >
-                                <Info size={12} />
-                                查看
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              ) : (
+                selectedCourtroomApprovals.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 py-16">
+                    <Check size={32} className="text-court-green/50 mb-3" />
+                    <p className="text-sm">该法庭暂无冲突审批记录</p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      {selectedCourtroom.name}
+                    </p>
                   </div>
-                )}
-              </div>
-            )}
+                ) : (
+                  <div className="space-y-3">
+                    {selectedCourtroomApprovals.map((approval) => (
+                      <div
+                        key={approval.id}
+                        className="border border-court-border rounded-xl p-4 bg-gradient-to-br from-court-card/80 to-court-panel/40"
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-mono text-sm text-court-gold">
+                                {approval.caseNumber}
+                              </span>
+                              <StatusBadge type="approval" status={approval.result} />
+                              <span
+                                className={`px-2 py-0.5 text-[10px] rounded-full border ${
+                                  approval.type === 'schedule_conflict'
+                                    ? 'bg-court-red/15 text-court-red border-court-red/30'
+                                    : 'bg-court-blue/15 text-court-blue border-court-blue/30'
+                                }`}
+                              >
+                                {approval.type === 'schedule_conflict'
+                                  ? '排期冲突'
+                                  : approval.type === 'dossier'
+                                  ? '案卷审批'
+                                  : '其他'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-slate-400">{approval.caseTitle}</p>
+                            {approval.conflictDescription && (
+                              <div className="mt-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-court-red/10 border border-court-red/20">
+                                <AlertTriangle
+                                  size={14}
+                                  className="text-court-red mt-0.5 flex-shrink-0"
+                                />
+                                <p className="text-xs text-court-red">
+                                  {approval.conflictDescription}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-slate-500">提交时间</p>
+                            <p className="text-xs text-slate-400 font-mono">
+                              {approval.createdAt}
+                            </p>
+                            <p className="text-[10px] text-slate-500 mt-2">当前阶段</p>
+                            <p className="text-xs text-court-gold">
+                              {getStageRoleLabel(approval.currentStage)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
           </div>
 
           <div className="glass-panel flex-1 overflow-hidden flex flex-col min-h-0">
@@ -1095,6 +1316,7 @@ export const CourtroomPage: React.FC = () => {
                           );
 
                           const hasGoldHighlight = scheduleAnimationActive && !c.conflictId;
+                          const isAutoAssigned = c.autoAssigned === true;
 
                           return (
                             <div
@@ -1103,14 +1325,16 @@ export const CourtroomPage: React.FC = () => {
                                 setSelectedCase(c);
                                 setSelectedCourtroom(courtroom);
                               }}
-                              className={`schedule-block absolute top-1 bottom-1 rounded-lg cursor-pointer flex items-center px-3 ${
+                              className={`schedule-block absolute top-1 bottom-1 rounded-lg cursor-pointer flex items-center px-3 overflow-hidden ${
                                 STATUS_COLORS[c.status]
                               } ${
                                 hasPendingConflict
                                   ? 'ring-2 ring-court-red ring-offset-1 ring-offset-court-bg'
                                   : ''
                               } ${
-                                hasGoldHighlight ? 'gold-highlight ring-2 ring-court-gold' : ''
+                                hasGoldHighlight || isAutoAssigned ? 'ring-2 ring-court-gold' : ''
+                              } ${
+                                hasGoldHighlight ? 'gold-highlight' : ''
                               }`}
                               style={{
                                 left: `calc(${pos.left} + 4px)`,
@@ -1118,7 +1342,13 @@ export const CourtroomPage: React.FC = () => {
                                 minWidth: '80px',
                               }}
                             >
-                              <div className="w-full overflow-hidden">
+                              {isAutoAssigned && (
+                                <div className="absolute top-0 left-0 px-1 py-0.5 bg-court-gold text-[8px] text-court-bg font-bold rounded-br-md flex items-center gap-0.5 shadow-md">
+                                  <Cpu size={7} />
+                                  智能
+                                </div>
+                              )}
+                              <div className={`w-full overflow-hidden ${isAutoAssigned ? 'pt-2' : ''}`}>
                                 <p className="text-[10px] text-white font-medium truncate">
                                   {c.caseNumber.match(/第(\d+)号/)?.[1]
                                     ? `第${c.caseNumber.match(/第(\d+)号/)?.[1]}号`
@@ -1294,7 +1524,7 @@ export const CourtroomPage: React.FC = () => {
                     <label className="text-sm text-slate-300">智能推荐</label>
                   </div>
                   {recommendation ? (
-                    <div className="border border-court-gold/30 rounded-xl p-4 bg-gradient-to-br from-court-gold/5 to-transparent relative overflow-hidden">
+                    <div className="border border-court-gold/30 rounded-xl p-4 bg-gradient-to-br from-court-gold/5 to-transparent relative overflow-hidden space-y-4">
                       <div className="absolute top-0 right-0 w-20 h-20 bg-court-gold/5 rounded-full -translate-y-1/2 translate-x-1/2" />
                       <div className="relative flex items-start justify-between">
                         <div className="flex-1">
@@ -1307,30 +1537,184 @@ export const CourtroomPage: React.FC = () => {
                               {recommendation.score}分
                             </span>
                           </div>
-                          <p className="text-xs text-slate-400 mb-3">
+                          <p className="text-xs text-slate-400">
                             <span className="text-slate-500">推荐理由：</span>
                             {recommendation.reason}
                           </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {recommendation.equipment.map((eq, idx) => (
-                              <span
-                                key={idx}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-court-gold/10 text-court-goldLight text-[10px] border border-court-gold/20"
-                              >
-                                <Monitor size={10} />
-                                {eq}
-                              </span>
-                            ))}
-                          </div>
                         </div>
                         <button
                           type="button"
                           onClick={handleUseRecommendation}
-                          className="ml-4 px-3 py-2 text-xs bg-court-gold text-court-bg rounded-lg font-medium hover:bg-court-goldLight transition-colors flex items-center gap-1"
+                          className={`ml-4 px-3 py-2 text-xs rounded-lg font-medium transition-colors flex items-center gap-1 ${
+                            usedRecommendation && formData.courtroomId === recommendation.courtroom.id
+                              ? 'bg-court-green text-court-bg'
+                              : 'bg-court-gold text-court-bg hover:bg-court-goldLight'
+                          }`}
                         >
                           <Check size={12} />
-                          使用推荐
+                          {usedRecommendation && formData.courtroomId === recommendation.courtroom.id ? '已使用' : '使用推荐'}
                         </button>
+                      </div>
+
+                      <div className="relative grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-slate-300 flex items-center gap-1">
+                            <Info size={12} className="text-court-gold" />
+                            推荐说明
+                          </p>
+                          <div className="space-y-1.5">
+                            {recommendation.matchingDetails.map((detail, idx) => {
+                              const isConflict = detail.includes('冲突') || detail.includes('撞期');
+                              const isOverlap = detail.includes('重叠');
+                              const isGood = !isConflict && !isOverlap;
+                              return (
+                                <div
+                                  key={idx}
+                                  className="flex items-center gap-2 text-xs"
+                                >
+                                  {isGood ? (
+                                    <Check size={12} className="text-court-green flex-shrink-0" />
+                                  ) : isConflict ? (
+                                    <X size={12} className="text-court-red flex-shrink-0" />
+                                  ) : (
+                                    <AlertTriangle size={12} className="text-court-orange flex-shrink-0" />
+                                  )}
+                                  <span
+                                    className={
+                                      isGood
+                                        ? 'text-slate-300'
+                                        : isConflict
+                                        ? 'text-court-red'
+                                        : 'text-court-orange'
+                                    }
+                                  >
+                                    {detail}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-slate-300 flex items-center gap-1">
+                            <Shield size={12} className="text-court-gold" />
+                            法庭适配信息
+                          </p>
+                          <div className="space-y-1.5 text-xs">
+                            <div className="flex items-center gap-2">
+                              <Gavel size={12} className="text-slate-500" />
+                              <span className="text-slate-500">适合案件：</span>
+                              <span className="text-slate-300">
+                                {recommendation.suitability.suitableTypes.map((t) => CASE_TYPE_LABELS[t]).join(' / ')}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Video size={12} className="text-slate-500" />
+                              <span className="text-slate-500">远程终端：</span>
+                              {recommendation.suitability.hasRemoteTerminal ? (
+                                <span className="text-court-green flex items-center gap-1">
+                                  <Check size={10} /> 已配备
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">未配备</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Presentation size={12} className="text-slate-500" />
+                              <span className="text-slate-500">证据展示台：</span>
+                              {recommendation.suitability.hasEvidenceDisplay ? (
+                                <span className="text-court-green flex items-center gap-1">
+                                  <Check size={10} /> 已配备
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">未配备</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users size={12} className="text-slate-500" />
+                              <span className="text-slate-500">容量：</span>
+                              <span className="text-slate-300">{recommendation.suitability.capacity}座</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="relative space-y-2">
+                        <p className="text-xs font-medium text-slate-300 flex items-center gap-1">
+                          {recommendation.conflictInfo.type === 'none' ? (
+                            <Check size={12} className="text-court-green" />
+                          ) : recommendation.conflictInfo.type === 'high-high' ? (
+                            <X size={12} className="text-court-red" />
+                          ) : (
+                            <AlertTriangle size={12} className="text-court-orange" />
+                          )}
+                          时段状态
+                        </p>
+                        {recommendation.conflictInfo.type === 'none' ? (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-court-green/10 border border-court-green/30">
+                            <Check size={14} className="text-court-green" />
+                            <span className="text-xs text-court-green">时段空闲，无冲突</span>
+                          </div>
+                        ) : recommendation.conflictInfo.type === 'high-high' ? (
+                          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-court-red/10 border border-court-red/30">
+                            <X size={14} className="text-court-red mt-0.5" />
+                            <div>
+                              <p className="text-xs text-court-red font-medium">双高优先级冲突</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                与 {recommendation.conflictInfo.conflictingCase?.caseNumber} 撞期，需三级审批
+                              </p>
+                            </div>
+                          </div>
+                        ) : recommendation.conflictInfo.type === 'high-low' ? (
+                          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-court-orange/10 border border-court-orange/30">
+                            <AlertTriangle size={14} className="text-court-orange mt-0.5" />
+                            <div>
+                              <p className="text-xs text-court-orange font-medium">优先级差异冲突</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                与 {recommendation.conflictInfo.conflictingCase?.caseNumber} 撞期，高优先级优先安排
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+                            <AlertTriangle size={14} className="text-yellow-500 mt-0.5" />
+                            <div>
+                              <p className="text-xs text-yellow-500 font-medium">时段重叠</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                与 {recommendation.conflictInfo.conflictingCase?.caseNumber} 同时段排期
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="relative space-y-2">
+                        <p className="text-xs font-medium text-slate-300 flex items-center gap-1">
+                          <Monitor size={12} className="text-court-gold" />
+                          设备清单
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {recommendation.equipment.map((eq, idx) => {
+                            const icon = eq.includes('远程')
+                              ? Video
+                              : eq.includes('证据')
+                              ? Presentation
+                              : eq.includes('直播') || eq.includes('录音') || eq.includes('录像')
+                              ? Monitor
+                              : Monitor;
+                            const IconComponent = icon;
+                            return (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-court-gold/10 text-court-goldLight text-[11px] border border-court-gold/25"
+                              >
+                                <IconComponent size={11} />
+                                {eq}
+                              </span>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   ) : (

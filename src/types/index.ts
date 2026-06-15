@@ -37,6 +37,8 @@ export interface CourtCase {
   conflictId?: string;
   startTime?: string;
   endTime?: string;
+  autoAssigned?: boolean;
+  assignReason?: string;
 }
 
 export interface Courtroom {
@@ -59,6 +61,8 @@ export type DossierStatus =
   | 'initial_rejected'
   | 'chief_review'
   | 'chief_rejected'
+  | 'president_review'
+  | 'president_rejected'
   | 'approved'
   | 'archived';
 
@@ -71,11 +75,13 @@ export interface Dossier {
   status: DossierStatus;
   pages: number;
   courtroomId?: string;
+  caseId?: string;
   formatErrors?: string[];
   rejectReason?: string;
   reviewHistory: {
     stage: string;
     reviewer: string;
+    reviewerRole?: UserRole;
     result: 'pass' | 'reject';
     comment: string;
     timestamp: string;
@@ -113,10 +119,17 @@ export interface EscortMission {
   startTime: string;
   expectedReturn: string;
   escortOfficers: string[];
-  status: 'planned' | 'in_progress' | 'completed' | 'overdue';
+  status: 'planned' | 'in_progress' | 'overdue' | 'disposing' | 'completed';
   progress: number;
   pathPoints: { x: number; y: number; z: number }[];
   terminalPushed: boolean;
+  disposalRecords: {
+    action: 'trigger_alarm' | 'start_disposal' | 'complete_return';
+    operator: string;
+    operatorRole?: UserRole;
+    timestamp: string;
+    note?: string;
+  }[];
 }
 
 export type ApprovalStage = 'judge' | 'chief' | 'president';

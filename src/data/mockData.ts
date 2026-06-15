@@ -311,6 +311,7 @@ export const mockEscortMissions: EscortMission[] = [
       { x: -8, y: 0, z: 0 },
     ],
     terminalPushed: true,
+    disposalRecords: [],
   },
   {
     id: 'e2',
@@ -330,6 +331,14 @@ export const mockEscortMissions: EscortMission[] = [
       { x: 0, y: 0, z: 0 },
     ],
     terminalPushed: true,
+    disposalRecords: [
+      {
+        action: 'trigger_alarm',
+        operator: '系统',
+        timestamp: '2026-06-15 13:30:00',
+        note: '系统自动触发超时警报',
+      },
+    ],
   },
 ];
 
@@ -337,6 +346,7 @@ export const mockDossiers: Dossier[] = [
   {
     id: 'dos1',
     caseNumber: '(2026)京刑初字第0125号',
+    caseId: 'c1',
     name: '盗窃案刑事卷宗',
     submittedBy: '张书记员',
     submittedAt: '2026-06-14 16:00:00',
@@ -345,14 +355,16 @@ export const mockDossiers: Dossier[] = [
     courtroomId: 'cr1',
     materials: ['起诉状', '证据清单', '证人证言', '鉴定报告', '讯问笔录'],
     reviewHistory: [
-      { stage: '格式校验', reviewer: '张书记员', result: 'pass', comment: '格式规范，页码完整', timestamp: '2026-06-14 16:30:00' },
-      { stage: '法官初审', reviewer: '李法官', result: 'pass', comment: '材料齐全，事实清楚', timestamp: '2026-06-14 17:30:00' },
-      { stage: '庭长批准', reviewer: '王庭长', result: 'pass', comment: '同意归档', timestamp: '2026-06-15 08:00:00' },
+      { stage: '格式校验', reviewer: '张书记员', reviewerRole: 'clerk', result: 'pass', comment: '格式规范，页码完整', timestamp: '2026-06-14 16:30:00' },
+      { stage: '法官初审', reviewer: '李法官', reviewerRole: 'judge', result: 'pass', comment: '材料齐全，事实清楚', timestamp: '2026-06-14 17:30:00' },
+      { stage: '庭长审批', reviewer: '王庭长', reviewerRole: 'chief', result: 'pass', comment: '事实证据属实，同意提交院长', timestamp: '2026-06-15 08:00:00' },
+      { stage: '院长审批', reviewer: '赵院长', reviewerRole: 'president', result: 'pass', comment: '批准归档', timestamp: '2026-06-15 08:30:00' },
     ],
   },
   {
     id: 'dos2',
     caseNumber: '(2026)京民初字第0876号',
+    caseId: 'c2',
     name: '合同纠纷民事卷宗',
     submittedBy: '孙书记员',
     submittedAt: '2026-06-14 17:00:00',
@@ -361,13 +373,14 @@ export const mockDossiers: Dossier[] = [
     courtroomId: 'cr2',
     materials: ['起诉状', '合同文本', '往来函件', '付款凭证'],
     reviewHistory: [
-      { stage: '格式校验', reviewer: '孙书记员', result: 'pass', comment: '格式符合规范', timestamp: '2026-06-14 17:20:00' },
-      { stage: '法官初审', reviewer: '周法官', result: 'pass', comment: '证据链完整', timestamp: '2026-06-15 09:00:00' },
+      { stage: '格式校验', reviewer: '孙书记员', reviewerRole: 'clerk', result: 'pass', comment: '格式符合规范', timestamp: '2026-06-14 17:20:00' },
+      { stage: '法官初审', reviewer: '周法官', reviewerRole: 'judge', result: 'pass', comment: '证据链完整', timestamp: '2026-06-15 09:00:00' },
     ],
   },
   {
     id: 'dos3',
     caseNumber: '(2026)京刑初字第0126号',
+    caseId: 'c4',
     name: '诈骗案刑事卷宗',
     submittedBy: '张书记员',
     submittedAt: '2026-06-15 09:00:00',
@@ -378,12 +391,13 @@ export const mockDossiers: Dossier[] = [
     rejectReason: '格式校验不通过，存在4处问题，请补正后重新提交',
     materials: ['起诉状', '证据清单(部分)', '银行流水'],
     reviewHistory: [
-      { stage: '格式校验', reviewer: '张书记员', result: 'reject', comment: '存在多处格式问题，详见错误清单', timestamp: '2026-06-15 09:45:00' },
+      { stage: '格式校验', reviewer: '张书记员', reviewerRole: 'clerk', result: 'reject', comment: '存在多处格式问题，详见错误清单', timestamp: '2026-06-15 09:45:00' },
     ],
   },
   {
     id: 'dos4',
     caseNumber: '(2026)京行初字第0034号',
+    caseId: 'c3',
     name: '行政复议卷宗',
     submittedBy: '朱书记员',
     submittedAt: '2026-06-15 10:00:00',
@@ -392,12 +406,13 @@ export const mockDossiers: Dossier[] = [
     courtroomId: 'cr3',
     materials: ['行政复议申请书', '行政决定书', '证据材料'],
     reviewHistory: [
-      { stage: '格式校验', reviewer: '朱书记员', result: 'pass', comment: '格式检查通过', timestamp: '2026-06-15 10:20:00' },
+      { stage: '格式校验', reviewer: '朱书记员', reviewerRole: 'clerk', result: 'pass', comment: '格式检查通过', timestamp: '2026-06-15 10:20:00' },
     ],
   },
   {
     id: 'dos5',
     caseNumber: '(2026)京民初字第0877号',
+    caseId: 'c5',
     name: '离婚纠纷卷宗',
     submittedBy: '陈书记员',
     submittedAt: '2026-06-15 11:00:00',

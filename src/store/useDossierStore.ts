@@ -15,8 +15,9 @@ interface DossierState {
   formatReject: (dossierId: string, errors: string[], reason: string) => boolean;
   initialReview: (dossierId: string, comment: string, pass: boolean) => boolean;
   chiefReview: (dossierId: string, comment: string, pass: boolean) => boolean;
+  presidentReview: (dossierId: string, comment: string, pass: boolean) => boolean;
   resubmitDossier: (dossierId: string) => boolean;
-  canPerformAction: (action: 'format_check' | 'initial_review' | 'chief_review' | 'submit') => boolean;
+  canPerformAction: (action: 'format_check' | 'initial_review' | 'chief_review' | 'president_review' | 'submit') => boolean;
   getDossiersByCourtroom: (courtroomId: string) => Dossier[];
 }
 
@@ -28,6 +29,8 @@ const STAGE_MAP: Record<DossierStatus, string> = {
   initial_rejected: '法官初审退回',
   chief_review: '庭长审批中',
   chief_rejected: '庭长审批退回',
+  president_review: '院长审批中',
+  president_rejected: '院长审批退回',
   approved: '审批通过',
   archived: '已归档',
 };
@@ -51,7 +54,9 @@ export const useDossierStore = create<DossierState>((set, get) => ({
       case 'initial_review':
         return role === 'judge';
       case 'chief_review':
-        return role === 'chief' || role === 'president';
+        return role === 'chief';
+      case 'president_review':
+        return role === 'president';
       default:
         return false;
     }
@@ -66,6 +71,8 @@ export const useDossierStore = create<DossierState>((set, get) => ({
     const newDossier: Dossier = {
       id: `dos${Date.now()}`,
       caseNumber: data.caseNumber || '',
+      caseId: data.caseId,
+      courtroomId: data.courtroomId,
       name: data.name || '新卷宗',
       submittedBy: user.name,
       submittedAt: new Date().toLocaleString('zh-CN'),
@@ -74,9 +81,13 @@ export const useDossierStore = create<DossierState>((set, get) => ({
       materials: data.materials || [],
       reviewHistory: [],
     };
-    set((s) => ({ dossiers: [...s.dossiers, newDossier] }));
+    set((s) => ({
+      dossiers: [...s.dossiers, newDossier],
+      selectedDossier: newDossier,
+    }));
     savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('提交案卷', newDossier.caseNumber);
+    console.log('[DossierStore] submitDossier 完成，selectedDossier 已更新为新案卷', newDossier.id, newDossier.status);
     return true;
   },
 
@@ -86,30 +97,39 @@ export const useDossierStore = create<DossierState>((set, get) => ({
     const user = useAuthStore.getState().currentUser;
     if (!user) return false;
 
-    set((s) => ({
-      dossiers: s.dossiers.map((d) =>
-        d.id === dossierId
-          ? {
-              ...d,
-              status: 'initial_review',
-              reviewHistory: [
-                ...d.reviewHistory,
-                {
-                  stage: '格式校验',
-                  reviewer: user.name,
-                  result: 'pass',
-                  comment: '格式检查通过',
-                  timestamp: new Date().toLocaleString('zh-CN'),
-                },
-              ],
-              formatErrors: undefined,
-              rejectReason: undefined,
-            }
-          : d
-      ),
-    }));
+    let updatedDossier: Dossier | null = null;
+    set((s) => {
+      const newDossiers = s.dossiers.map((d) => {
+        if (d.id === dossierId) {
+          updatedDossier = {
+            ...d,
+            status: 'initial_review',
+            reviewHistory: [
+              ...d.reviewHistory,
+              {
+                stage: '格式校验',
+                reviewer: user.name,
+                reviewerRole: user.role,
+                result: 'pass',
+                comment: '格式检查通过',
+                timestamp: new Date().toLocaleString('zh-CN'),
+              },
+            ],
+            formatErrors: undefined,
+            rejectReason: undefined,
+          };
+          return updatedDossier;
+        }
+        return d;
+      });
+      return {
+        dossiers: newDossiers,
+        selectedDossier: s.selectedDossier?.id === dossierId ? updatedDossier : s.selectedDossier,
+      };
+    });
     savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('格式校验通过', `案卷ID: ${dossierId}`);
+    console.log('[DossierStore] formatCheck 完成，selectedDossier 已自动更新', dossierId, updatedDossier?.status);
     return true;
   },
 
@@ -119,30 +139,39 @@ export const useDossierStore = create<DossierState>((set, get) => ({
     const user = useAuthStore.getState().currentUser;
     if (!user) return false;
 
-    set((s) => ({
-      dossiers: s.dossiers.map((d) =>
-        d.id === dossierId
-          ? {
-              ...d,
-              status: 'format_rejected',
-              formatErrors: errors,
-              rejectReason: reason,
-              reviewHistory: [
-                ...d.reviewHistory,
-                {
-                  stage: '格式校验',
-                  reviewer: user.name,
-                  result: 'reject',
-                  comment: reason,
-                  timestamp: new Date().toLocaleString('zh-CN'),
-                },
-              ],
-            }
-          : d
-      ),
-    }));
+    let updatedDossier: Dossier | null = null;
+    set((s) => {
+      const newDossiers = s.dossiers.map((d) => {
+        if (d.id === dossierId) {
+          updatedDossier = {
+            ...d,
+            status: 'format_rejected',
+            formatErrors: errors,
+            rejectReason: reason,
+            reviewHistory: [
+              ...d.reviewHistory,
+              {
+                stage: '格式校验',
+                reviewer: user.name,
+                reviewerRole: user.role,
+                result: 'reject',
+                comment: reason,
+                timestamp: new Date().toLocaleString('zh-CN'),
+              },
+            ],
+          };
+          return updatedDossier;
+        }
+        return d;
+      });
+      return {
+        dossiers: newDossiers,
+        selectedDossier: s.selectedDossier?.id === dossierId ? updatedDossier : s.selectedDossier,
+      };
+    });
     savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('格式校验退回', `案卷ID: ${dossierId}, ${errors.length}处问题`);
+    console.log('[DossierStore] formatReject 完成，selectedDossier 已自动更新', dossierId, updatedDossier?.status);
     return true;
   },
 
@@ -152,29 +181,38 @@ export const useDossierStore = create<DossierState>((set, get) => ({
     const user = useAuthStore.getState().currentUser;
     if (!user) return false;
 
-    set((s) => ({
-      dossiers: s.dossiers.map((d) =>
-        d.id === dossierId
-          ? {
-              ...d,
-              status: pass ? 'chief_review' : 'initial_rejected',
-              reviewHistory: [
-                ...d.reviewHistory,
-                {
-                  stage: '法官初审',
-                  reviewer: user.name,
-                  result: pass ? 'pass' : 'reject',
-                  comment,
-                  timestamp: new Date().toLocaleString('zh-CN'),
-                },
-              ],
-              rejectReason: pass ? undefined : comment,
-            }
-          : d
-      ),
-    }));
+    let updatedDossier: Dossier | null = null;
+    set((s) => {
+      const newDossiers = s.dossiers.map((d) => {
+        if (d.id === dossierId) {
+          updatedDossier = {
+            ...d,
+            status: pass ? 'chief_review' : 'initial_rejected',
+            reviewHistory: [
+              ...d.reviewHistory,
+              {
+                stage: '法官初审',
+                reviewer: user.name,
+                reviewerRole: user.role,
+                result: pass ? 'pass' : 'reject',
+                comment,
+                timestamp: new Date().toLocaleString('zh-CN'),
+              },
+            ],
+            rejectReason: pass ? undefined : comment,
+          };
+          return updatedDossier;
+        }
+        return d;
+      });
+      return {
+        dossiers: newDossiers,
+        selectedDossier: s.selectedDossier?.id === dossierId ? updatedDossier : s.selectedDossier,
+      };
+    });
     savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog(pass ? '法官初审通过' : '法官初审退回', `案卷ID: ${dossierId}`);
+    console.log('[DossierStore] initialReview 完成，selectedDossier 已自动更新', dossierId, updatedDossier?.status);
     return true;
   },
 
@@ -184,42 +222,102 @@ export const useDossierStore = create<DossierState>((set, get) => ({
     const user = useAuthStore.getState().currentUser;
     if (!user) return false;
 
-    set((s) => ({
-      dossiers: s.dossiers.map((d) =>
-        d.id === dossierId
-          ? {
-              ...d,
-              status: pass ? 'approved' : 'chief_rejected',
-              reviewHistory: [
-                ...d.reviewHistory,
-                {
-                  stage: '庭长批准',
-                  reviewer: user.name,
-                  result: pass ? 'pass' : 'reject',
-                  comment,
-                  timestamp: new Date().toLocaleString('zh-CN'),
-                },
-              ],
-              rejectReason: pass ? undefined : comment,
-            }
-          : d
-      ),
-    }));
+    let updatedDossier: Dossier | null = null;
+    set((s) => {
+      const newDossiers = s.dossiers.map((d) => {
+        if (d.id === dossierId) {
+          updatedDossier = {
+            ...d,
+            status: pass ? 'president_review' : 'chief_rejected',
+            reviewHistory: [
+              ...d.reviewHistory,
+              {
+                stage: '庭长审批',
+                reviewer: user.name,
+                reviewerRole: user.role,
+                result: pass ? 'pass' : 'reject',
+                comment,
+                timestamp: new Date().toLocaleString('zh-CN'),
+              },
+            ],
+            rejectReason: pass ? undefined : comment,
+          };
+          return updatedDossier;
+        }
+        return d;
+      });
+      return {
+        dossiers: newDossiers,
+        selectedDossier: s.selectedDossier?.id === dossierId ? updatedDossier : s.selectedDossier,
+      };
+    });
     savePersist(PERSIST_KEY, get().dossiers);
-    useAuthStore.getState().recordLog(pass ? '庭长批准通过' : '庭长审批退回', `案卷ID: ${dossierId}`);
+    useAuthStore.getState().recordLog(pass ? '庭长审批通过' : '庭长审批退回', `案卷ID: ${dossierId}`);
+    console.log('[DossierStore] chiefReview 完成，selectedDossier 已自动更新', dossierId, updatedDossier?.status);
+    return true;
+  },
+
+  presidentReview: (dossierId, comment, pass) => {
+    if (!get().canPerformAction('president_review')) return false;
+
+    const user = useAuthStore.getState().currentUser;
+    if (!user) return false;
+
+    let updatedDossier: Dossier | null = null;
+    set((s) => {
+      const newDossiers = s.dossiers.map((d) => {
+        if (d.id === dossierId) {
+          updatedDossier = {
+            ...d,
+            status: pass ? 'approved' : 'president_rejected',
+            reviewHistory: [
+              ...d.reviewHistory,
+              {
+                stage: '院长审批',
+                reviewer: user.name,
+                reviewerRole: user.role,
+                result: pass ? 'pass' : 'reject',
+                comment,
+                timestamp: new Date().toLocaleString('zh-CN'),
+              },
+            ],
+            rejectReason: pass ? undefined : comment,
+          };
+          return updatedDossier;
+        }
+        return d;
+      });
+      return {
+        dossiers: newDossiers,
+        selectedDossier: s.selectedDossier?.id === dossierId ? updatedDossier : s.selectedDossier,
+      };
+    });
+    savePersist(PERSIST_KEY, get().dossiers);
+    useAuthStore.getState().recordLog(pass ? '院长审批通过' : '院长审批退回', `案卷ID: ${dossierId}`);
+    console.log('[DossierStore] presidentReview 完成，selectedDossier 已自动更新', dossierId, updatedDossier?.status);
     return true;
   },
 
   resubmitDossier: (dossierId) => {
     if (!get().canPerformAction('submit')) return false;
 
-    set((s) => ({
-      dossiers: s.dossiers.map((d) =>
-        d.id === dossierId ? { ...d, status: 'format_checking' } : d
-      ),
-    }));
+    let updatedDossier: Dossier | null = null;
+    set((s) => {
+      const newDossiers = s.dossiers.map((d) => {
+        if (d.id === dossierId) {
+          updatedDossier = { ...d, status: 'format_checking' };
+          return updatedDossier;
+        }
+        return d;
+      });
+      return {
+        dossiers: newDossiers,
+        selectedDossier: s.selectedDossier?.id === dossierId ? updatedDossier : s.selectedDossier,
+      };
+    });
     savePersist(PERSIST_KEY, get().dossiers);
     useAuthStore.getState().recordLog('重新提交案卷', `案卷ID: ${dossierId}`);
+    console.log('[DossierStore] resubmitDossier 完成，selectedDossier 已自动更新', dossierId, updatedDossier?.status);
     return true;
   },
 
